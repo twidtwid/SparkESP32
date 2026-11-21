@@ -39,8 +39,9 @@ The demo screen (`tools/devctl.py demoshot`, load 70).
   signals, because an interrupt that lands while flash is busy (saving a setting)
   can't call code in flash.
 - The backlight stays off until the first real frame is on the glass.
-- Landscape only: `rot cw` (the default) and `rot ccw`; `rot none` (portrait)
-  answers `ERR rot none not supported on this board`.
+- Landscape only: `rot cw` (the default) is upright with the USB-C port on the
+  right, like the C6 (checked on the real board); `rot ccw` is the same turned 180
+  degrees. `rot none` (portrait) answers `ERR rot none not supported on this board`.
 
 ## Verified
 

@@ -116,7 +116,8 @@ CPU, memory and the core heatmap don't depend on `nvidia-smi`.
 ## The image is sideways
 
 `sudo ./install.sh --rotation none|ccw|cw`. The default `cw` is the board's upright
-position: on the C6 AMOLED, USB-C on the right; on the RLCD, sitting on its stand. A
+position: on the C6 AMOLED and the ES3C28P, USB-C on the right; on the RLCD, sitting
+on its stand. A
 board with a rectangular screen is laid out for one shape and
 takes only the two rotations that keep it: the S3 boards are landscape, `ccw` or `cw`,
 and answer `ERR rot none not supported on this board` to the third.

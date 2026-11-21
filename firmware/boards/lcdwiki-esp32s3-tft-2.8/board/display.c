@@ -92,7 +92,8 @@ esp_err_t display_lock(int timeout_ms)
 void display_unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 
 // Landscape both ways round: the panel swaps rows and columns (MV) and mirrors one
-// axis. `rot none` would be portrait, which the 320x240 layout isn't.
+// axis. CW is upright with the USB-C port on the right (checked on the real board).
+// `rot none` would be portrait, which the 320x240 layout isn't.
 esp_err_t display_set_rotation(display_rot_t rot)
 {
     if (rot == DISPLAY_ROT_NONE) return ESP_ERR_NOT_SUPPORTED;
