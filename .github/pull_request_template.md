@@ -22,11 +22,11 @@ See CONTRIBUTING.md, "Adding a new device".
 
 Board: <!-- maker, model, link -->  ·  Issue: <!-- #123 -->
 
-- [ ] `firmware/boards/<id>/` passes `tools/check_boards.py`, and the board is listed in `firmware/boards/README.md`
-- [ ] The board README says where the pins and register values came from, and no vendor code is copied without a license that allows it
+- [ ] Started with `tools/new_board.py`; `firmware/boards/<id>/` passes `tools/check_boards.py`, and the board is listed in `firmware/boards/README.md` and the README's supported-boards table
+- [ ] The board README credits, with links, where the pins and register values came from (and their license); no vendor code copied without a license that allows it; new components in `THIRD_PARTY_NOTICES.md`
 - [ ] `devctl.py status` shows `board=<id>` (output attached)
-- [ ] `devctl.py demoshot` screenshot attached
-- [ ] Photo of the physical screen attached: upright, not mirrored, not inverted
+- [ ] Demo screenshot committed as `assets/boards/<id>.png`
+- [ ] Photo of the physical screen attached: lit, upright, not mirrored, not inverted
 - [ ] Rotations: <!-- which work; which answer "not supported" -->
 - [ ] Wi-Fi: `screen=online reason='via WI-FI'` with live values
 - [ ] Five cold plug-ins, each answered

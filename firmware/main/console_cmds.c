@@ -133,12 +133,18 @@ static int cmd_rot(int argc, char **argv)
     int r = display_rot_from_name(argv[1]);
     if (r < 0) { printf("ERR usage: rot none|ccw|cw\n"); return 1; }
     if (display_lock(5000) != ESP_OK) { printf("ERR lock\n"); return 1; }
+    display_rot_t prev = display_get_rotation();
     if (display_set_rotation((display_rot_t)r) != ESP_OK) {
         display_unlock();
         printf("ERR rot %s not supported on this board\n", argv[1]);
         return 1;
     }
-    if (settings_set("rot", argv[1]) != ESP_OK) { display_unlock(); printf("ERR rot save\n"); return 1; }
+    if (settings_set("rot", argv[1]) != ESP_OK) {     // unsaved: keep the screen as it was
+        display_set_rotation(prev);
+        display_unlock();
+        printf("ERR rot save\n");
+        return 1;
+    }
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(lv_display_get_default());
     display_unlock();

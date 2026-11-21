@@ -3,6 +3,10 @@
 [Product page](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm). The board
 SparkESP32 was built on and is verified against end to end; the default build.
 
+![waveshare-esp32c6-amoled-2.16 demo screen](../../../assets/boards/waveshare-esp32c6-amoled-2.16.png)
+
+The demo screen (`tools/devctl.py demoshot`, load 70).
+
 | | |
 |---|---|
 | Chip | ESP32-C6, 16 MB flash, no PSRAM |

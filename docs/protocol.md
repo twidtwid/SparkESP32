@@ -72,8 +72,9 @@ STATUS-END
 ```
 
 `board=` is the board's directory under `firmware/boards/`. The installer uses it to
-pick the firmware to flash. Firmware from before boards had no `board=`; treat that as
-the reference board.
+pick the firmware to flash. Firmware from before boards (and factory firmware) has no
+`board=`: the installer then asks the chip with esptool, and when more than one board
+uses that chip it asks for `--board`.
 
 **Ask more than once.** The serial port appears the moment the board is plugged in or
 reset, about 2 s before its console is running, and the console's terminal probe (IDF's

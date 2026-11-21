@@ -53,66 +53,85 @@ replies, or the installer. It lists what has to change together.
 
 ## Adding a new device
 
-New boards are welcome. A board is accepted when someone has run it, so the
-pull request carries the evidence. The how-to is
-[docs/adding-a-device.md](docs/adding-a-device.md).
+New boards are welcome. A board is accepted once someone has run it on the real
+hardware, so the pull request carries the evidence. The full how-to is
+[docs/adding-a-device.md](docs/adding-a-device.md); this is the path from idea to merge.
 
-### 1. Open an issue first
+### 1. Open an issue
 
 Use the **New device** issue template. It asks for the board, its chip and
-display, and whether it passes the checks in
+display, and whether it passes
 [Will your board work?](docs/adding-a-device.md#will-your-board-work). Someone
-will confirm it fits before you spend an evening on a port, or tell you why it
+will confirm it fits before you spend an evening on it, or tell you why it
 doesn't (most often: a USB-UART bridge instead of the chip's own USB).
 
-### 2. Make the port
+### 2. Start the board
 
-One branch, one board. The pull request adds:
+On a branch named `board/<id>`, with `<id>` as `<vendor>-<chip>-<display>-<size>`:
 
-- `firmware/boards/<id>/` with everything `tools/check_boards.py` asks for,
-  including a `README.md` with the chip, display, pins, where the facts came
-  from, the quirks you hit, and a **Verified** section
-- a row in `firmware/boards/README.md`
-- a UI layout in `firmware/main/ui.c`, only if your canvas size is new
-- an entry in `THIRD_PARTY_NOTICES.md` for any new component or source of
-  register values
-- a `CHANGELOG.md` entry
+```sh
+python3 tools/new_board.py <id> --from <closest board> [--chip esp32c3]
+```
 
-It doesn't change the existing boards, the default board, or the shared code
-beyond a new layout. If your board needs a change in `firmware/main/`, say why
-in the pull request; a change there must build and work on every board.
+That copies the closest board, renames it, points it at its own partition table,
+writes a README skeleton and lists it in `firmware/boards/README.md`. Then follow
+the guide: pins and panel driver in `firmware/boards/<id>/board/`, a layout in
+`firmware/main/ui.c` if your screen size is new.
 
-### 3. Show it works
+### 3. Make it work on the board, and show it
 
-Fill in the device checklist in the pull request template. Attach:
+Run the guide's [Verify](docs/adding-a-device.md#8-verify) table on the real board
+and attach the results to the pull request:
 
 | Evidence | From |
 |---|---|
 | `devctl.py status` output, showing `board=<id>` | `python3 tools/devctl.py status` |
-| A screenshot | `python3 tools/devctl.py demoshot <id>.png 70` |
-| A photo of the physical screen showing the same demo | your phone. The screenshot is LVGL's render; only a photo catches a mirrored, inverted or shifted panel |
+| The demo screenshot, committed as `assets/boards/<id>.png` | `python3 tools/devctl.py demoshot assets/boards/<id>.png 70` |
+| A photo of the physical screen showing the same demo | your phone. The screenshot is LVGL's render; only a photo catches a dark, mirrored, inverted or shifted panel |
 | Which rotations work, and the refusal for the others | `devctl.py rot cw`, `rot ccw`, `rot none` |
 | Wi-Fi: `screen=online reason='via WI-FI'` | `devctl.py status` after `tools/provision.py --ssids ... --host ...` |
 | Five cold plug-ins in a row, each answered | unplug, wait 10 s, plug in, `devctl.py status` |
 | The installer on a Spark, if you have one | `sudo ./install.sh --board <id>` from your branch |
 
 Remove private data before you attach anything: Wi-Fi names, hostnames,
-addresses and MAC addresses appear in `status` output, and `devctl.py shot`
-shows the board's title.
+addresses and MAC addresses appear in `status` output, and screenshots show the
+board's title (`demoshot` uses the neutral `spark-demo`). No Spark? Say so; a
+maintainer runs the installer check before merging.
 
-No Spark? Say so. A maintainer runs the installer check before merging.
+### 4. Write it up, with credit
 
-### 4. Review and CI
+The pull request adds, besides the code:
 
-CI builds every board on every pull request, and a new board directory joins
-the build matrix automatically. Expect review to look at the contract
-(`firmware/components/board_api/`), locking around LVGL, the license of
-anything that came from the vendor, and whether the board README's
-**Verified** section matches the evidence.
+- `firmware/boards/<id>/README.md`: chip, display, pins, how the display is
+  driven, the quirks you hit, and a **Verified** section that says what was run on
+  the real board and what wasn't
+- `assets/boards/<id>.png`: the demo screenshot (for a 1-bit panel, what the
+  panel shows)
+- a row in the README's supported-boards table and in `firmware/boards/README.md`
+- credit, with links, for everything you built on: the vendor's docs and
+  schematics, any example code or register values you used and its license, other
+  projects' board definitions, and any new component, in your board README and in
+  `THIRD_PARTY_NOTICES.md`. Don't copy code whose license doesn't allow it; facts
+  like pins and register values are fine, credited
+- a `CHANGELOG.md` entry
 
-The reference board stays the default and the one in the main README and
-screenshots. Additional boards are listed in
-[firmware/boards/README.md](firmware/boards/README.md) and the README's
-supported-boards table, with the status their evidence supports.
+It doesn't change the existing boards or the default board. If your board needs a
+change in `firmware/main/`, say why in the pull request; a change there must build
+and work on every board.
+
+### 5. Open the pull request
+
+`make check` passes (it runs `tools/check_boards.py`, which names anything
+missing), and `make dist` builds every board with no new warnings. Open the pull
+request and fill in the template's **New device** section with the evidence from
+step 3.
+
+CI builds every board on every pull request; a new board directory joins the build
+matrix automatically. Review looks at the contract
+(`firmware/components/board_api/`), locking around LVGL, the license and credit of
+anything from the vendor, and whether the **Verified** section matches the evidence.
+
+The C6 AMOLED stays the default board and the one in the README's hero image.
+Other boards are listed with the status their evidence supports.
 
 By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

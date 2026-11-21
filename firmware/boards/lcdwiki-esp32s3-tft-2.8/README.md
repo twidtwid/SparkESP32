@@ -1,8 +1,12 @@
-# LCDWiki 2.8inch ESP32-S3 Display, ES3C28P (third board)
+# LCDWiki 2.8inch ESP32-S3 Display (ES3C28P)
 
 [LCDWiki page](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display). Sold under several
 brand names; the board's SKU is ES3C28P (with touch) or ES3N28P (without). The cheap,
 common case: a color SPI TFT with a backlight. The C6 AMOLED stays the recommended board.
+
+![lcdwiki-esp32s3-tft-2.8 demo screen](../../../assets/boards/lcdwiki-esp32s3-tft-2.8.png)
+
+The demo screen (`tools/devctl.py demoshot`, load 70).
 
 | | |
 |---|---|

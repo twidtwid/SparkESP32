@@ -88,6 +88,7 @@ tools/
   provision.py             set name/host/Wi-Fi/rotation over USB (never prints the password)
   devctl.py                bench/QA: status, demo, CRC-checked screenshots, raw console
   check_boards.py          every firmware/boards/<id>/ has what a board needs (make check)
+  new_board.py             start a new board from an existing one
 firmware/                  ESP-IDF 5.5 project; the board picks the chip
   main/spark_data.c        the protocol parser both transports share
   main/net.c               Wi-Fi supervisor + 1 Hz HTTP poll
@@ -101,7 +102,9 @@ firmware/                  ESP-IDF 5.5 project; the board picks the chip
     waveshare-esp32c6-amoled-2.16/   the reference board, and the default
     lcdwiki-esp32s3-tft-2.8/         ESP32-S3, 2.8" color SPI TFT (esp_lcd_ili9341)
     waveshare-esp32s3-rlcd-4.2/      ESP32-S3, 1-bit reflective LCD (hand-written driver)
-tests/                     host tests: agent + tools (Python); parser and state machines (C)
+tests/                     host tests: agent + tools, boards + installer detection (Python);
+                           parser and state machines (C)
+assets/boards/<id>.png     each board's demo screenshot
 docs/                      protocol.md, troubleshooting.md, adding-a-device.md
 ```
 
@@ -147,10 +150,12 @@ This is the order to work in and what to prove at each step.
    order, from the vendor's docs. Check the license of any vendor example before
    reusing it; with no license, write the driver yourself and cite the source in the
    board README and `THIRD_PARTY_NOTICES.md`.
-4. **Copy the closer existing board** to `firmware/boards/<vendor>-<chip>-<display>-<size>/`,
-   delete the copy's `dependencies.lock`, then edit `board_config.h`, `sdkconfig.defaults`,
-   `partitions.csv` (if flash < 8 MB), `board/CMakeLists.txt`, `board/idf_component.yml`, and add
-   the board to `firmware/boards/README.md`. `python3 tools/check_boards.py` must pass.
+4. **Scaffold from the closer existing board**:
+   `python3 tools/new_board.py <vendor>-<chip>-<display>-<size> --from <board> [--chip <chip>]`.
+   Then edit `board_config.h` (UI size, mono flag), `sdkconfig.defaults` (flash, PSRAM),
+   `partitions.csv` (if flash < 8 MB), `board/CMakeLists.txt`, `board/idf_component.yml`,
+   and the board's row in `firmware/boards/README.md`. Don't hand-copy the directory: the
+   scaffold fixes the paths a copy gets wrong. `python3 tools/check_boards.py` lists what's left.
 5. **Panel first, LVGL second.** Get a solid fill on the whole panel from `board_init()`,
    then write `display.c` against the contract in `firmware/components/board_api/`.
    Render RGB565; convert in the flush callback.
@@ -163,9 +168,11 @@ This is the order to work in and what to prove at each step.
    check the physical screen (lit, upright, not mirrored, not inverted) and do the cold
    plug-ins. Ask for those in one batch, once, at the end, and don't report the board
    as working until the screen check is in.
-9. **Write the board README**: chip, display, pins, sources, quirks, and a "Verified"
-   section that says what was checked on the real board and what wasn't. Don't claim a
-   check nobody ran.
+9. **Write the board README** (the scaffold leaves a skeleton): chip, display, pins,
+   sources, quirks, and the "Verified" section: what was checked on the real board and
+   what wasn't. Don't claim a check nobody ran. Save the demo screenshot as
+   `assets/boards/<id>.png` (`tools/devctl.py demoshot assets/boards/<id>.png 70`; for a
+   1-bit panel, the image after your driver's threshold).
 10. **Open the pull request** following [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-device),
     with the evidence it lists.
 

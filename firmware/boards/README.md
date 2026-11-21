@@ -15,7 +15,12 @@ make boards                                   # list them
 make build BOARD=waveshare-esp32s3-rlcd-4.2   # build one (the C6 is the default)
 make flash BOARD=<id> PORT=/dev/ttyACM0
 make dist                                     # every board's release bundle
+python3 tools/new_board.py <id> --from <board>  # start a new board from an existing one
 ```
+
+Each board's demo screenshot is `assets/boards/<id>.png`. Porting a new board:
+[docs/adding-a-device.md](../../docs/adding-a-device.md); submitting it:
+[CONTRIBUTING.md](../../CONTRIBUTING.md#adding-a-new-device).
 
 A board directory holds:
 
@@ -28,4 +33,5 @@ A board directory holds:
 | `dependencies.lock` | the component versions it builds with (written by the first build) |
 | `README.md` | hardware notes: pins, sources, quirks, and what has been verified on the real thing |
 
-`make check` runs `tools/check_boards.py`, which checks all of the above.
+`make check` runs `tools/check_boards.py`, which checks all of the above, plus that the
+README has a **Verified** section and the board has its screenshot.

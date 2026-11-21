@@ -40,7 +40,8 @@ SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
   --open-wifi              the Wi-Fi network has no password
   --clear-wifi             make the display forget its Wi-Fi settings
   --no-wifi                don't ask about Wi-Fi
-  --rotation none|ccw|cw   screen rotation (default cw: USB-C port on the right)
+  --rotation none|ccw|cw   screen rotation (default cw: the board's upright position;
+                           landscape-only boards take ccw or cw)
   --board ID               which board is on USB (default: what its firmware says, or
                            its chip); one of: $(boards)
   --firmware DIR           flash a firmware bundle from DIR (the images + flash_args)
@@ -187,9 +188,7 @@ firmware_dir() {     # echo a dir holding $BOARD's bundle for $VERSION, fetching
 }
 
 pick_board() {       # which board is on $PORT: --board, what its firmware says, or its chip
-    if [ -z "$BOARD" ]; then
-        BOARD="$(sed -n 's/^fw=sparkesp32 .*board=\([^ ]*\).*/\1/p' <<<"$DEV_STATUS")"
-    fi
+    [ -n "$BOARD" ] || BOARD="$(status_board)"
     if [ -z "$BOARD" ]; then      # factory firmware, or SparkESP32 from before boards: ask the chip
         local chip b found=()
         chip="$("$PY" -m esptool -p "$PORT" chip_id 2>/dev/null | sed -n 's/^Chip is \(ESP32-[A-Z0-9]*\).*/\1/p' |
@@ -197,7 +196,7 @@ pick_board() {       # which board is on $PORT: --board, what its firmware says,
         [ -n "$chip" ] || die "couldn't identify the board on $PORT; name it with --board ($(boards))"
         for b in $(boards); do [ "$(board_target "$b")" = "$chip" ] && found+=("$b"); done
         [ "${#found[@]}" -eq 1 ] ||
-            die "the board on $PORT is an $chip; pick its board with --board (one of: $(boards))"
+            die "the board on $PORT is an $chip; pick its board with --board (one of: ${found[*]:-$(boards)})"
         BOARD="${found[0]}"
     fi
     [ -n "$(board_target "$BOARD")" ] || die "unknown board '$BOARD'; one of: $(boards)"
@@ -206,6 +205,7 @@ pick_board() {       # which board is on $PORT: --board, what its firmware says,
 DEV_STATUS=""
 read_status() { DEV_STATUS="$(devctl status 2>/dev/null)" || DEV_STATUS=""; }
 board_version() { sed -n 's/^fw=sparkesp32 version=\([^ ]*\).*/\1/p' <<<"$DEV_STATUS"; }
+status_board() { sed -n 's/^fw=sparkesp32 .*board=\([^ ]*\).*/\1/p' <<<"$DEV_STATUS"; }   # "" before boards
 
 if [ -z "$PORT" ]; then
     warn "no display on USB: skipping flash + setup. Plug it into this Spark and re-run,"
@@ -216,7 +216,8 @@ else
     BOARD_VER="$(board_version)"
     if [ -n "$NO_FLASH" ]; then
         [ -n "$BOARD_VER" ] || warn "the board isn't running SparkESP32 firmware and --no-flash was given"
-    elif [ -n "$REFLASH" ] || [ "$BOARD_VER" != "$VERSION" ]; then
+    elif [ -n "$REFLASH" ] || [ "$BOARD_VER" != "$VERSION" ] ||
+         { [ -n "$BOARD" ] && [ "$(status_board)" != "$BOARD" ]; }; then   # --board names another board
         pick_board
         FW="$(firmware_dir)"
         say "flashing firmware $VERSION for $BOARD (board had: ${BOARD_VER:-other firmware})"
@@ -234,8 +235,8 @@ else
         [ -n "$DEV_STATUS" ] || die "the board didn't answer after flashing"
         [ "$(board_version)" = "$VERSION" ] ||
             warn "the board now runs '$(board_version)', not $VERSION: was $FW built from another version?"
-        grep -q "board=$BOARD\b" <<<"$DEV_STATUS" ||
-            warn "the board doesn't report board=$BOARD: was $FW built for another board?"
+        [ "$(status_board)" = "$BOARD" ] ||
+            warn "the board reports board='$(status_board)', not $BOARD: was $FW built for another board?"
     else
         say "board already runs $VERSION"
     fi

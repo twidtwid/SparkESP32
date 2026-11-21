@@ -1,8 +1,9 @@
 idf_component_register(
     SRCS "board.c" "pmic.cpp" "display.c"
     INCLUDE_DIRS "include"
-    REQUIRES board_api esp_lcd
+    REQUIRES board_api
     PRIV_REQUIRES
+        esp_lcd
         esp_driver_i2c
         esp_driver_spi
         xpowerslib

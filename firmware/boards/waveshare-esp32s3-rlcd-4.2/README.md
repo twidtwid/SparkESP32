@@ -5,6 +5,10 @@
 `esp_lcd` driver: a hand-written ST7306 driver and a mono theme. The C6 AMOLED stays
 the recommended board.
 
+![waveshare-esp32s3-rlcd-4.2 demo screen](../../../assets/boards/waveshare-esp32s3-rlcd-4.2.png)
+
+The demo screen at load 100, as the 1-bit panel shows it: LVGL's render through `display.c`'s threshold.
+
 | | |
 |---|---|
 | Chip | ESP32-S3 (S3R8): 16 MB flash, 8 MB octal PSRAM |

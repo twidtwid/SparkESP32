@@ -34,7 +34,7 @@ static void tick_task(void *arg)
 static display_rot_t saved_rotation(void)
 {
     char r[8];
-    settings_get("rot", r, sizeof(r), "cw");   // cw: upright with the USB-C on the right
+    settings_get("rot", r, sizeof(r), "cw");   // cw: the board's upright position
     int rot = display_rot_from_name(r);
     return rot < 0 ? DISPLAY_ROT_CW : (display_rot_t)rot;
 }

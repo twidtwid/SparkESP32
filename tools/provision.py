@@ -65,7 +65,7 @@ def main():
     pw.add_argument("--password-stdin", action="store_true", help="read it from the first stdin line")
     pw.add_argument("--open", action="store_true", help="the network has no password")
     ap.add_argument("--rotation", choices=["none", "ccw", "cw"],
-                    help="screen rotation (default cw: upright with the USB-C port on the right)")
+                    help="screen rotation (default cw: the board's upright position)")
     ap.add_argument("--clear-wifi", action="store_true", help="forget SSIDs, password and URL")
     a = ap.parse_args()
 

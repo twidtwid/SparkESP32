@@ -12,6 +12,8 @@ BOARDS  := $(shell find firmware/boards -mindepth 1 -maxdepth 1 -type d -exec ba
 BOARD   ?= waveshare-esp32c6-amoled-2.16
 BUILD    = firmware/build/$(BOARD)
 # The board decides the chip. Passing it keeps idf.py from guessing from a stray sdkconfig.
+# Build one board at a time: every board shares firmware/managed_components, which the
+# component manager re-syncs to that board's dependencies.lock.
 TARGET   = $(shell sed -n 's/^CONFIG_IDF_TARGET="\{0,1\}\([a-z0-9]*\)"\{0,1\}$$/\1/p' \
               firmware/boards/$(BOARD)/sdkconfig.defaults 2>/dev/null)
 IDF      = cd firmware && IDF_TARGET=$(TARGET) idf.py -B build/$(BOARD) -DBOARD=$(BOARD) \
@@ -59,8 +61,10 @@ dist:
 	@ls -l $(DIST)
 
 check:
-	$(PY) -m py_compile agent/sparkesp32_agent.py tools/sparklink.py tools/provision.py tools/devctl.py
+	$(PY) -m py_compile agent/sparkesp32_agent.py tools/sparklink.py tools/provision.py tools/devctl.py \
+	   tools/check_boards.py tools/new_board.py
 	$(PY) tests/test_agent.py
+	$(PY) tests/test_boards.py
 	$(PY) tools/check_boards.py
 	@mkdir -p tests/.build
 	$(CC) -std=c11 -Wall -Wextra -Werror -Itests/stubs -Ifirmware/main \

@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## 0.1.0 — 2026-11-20
+## 0.1.0 (unreleased)
 
 First public release.
 
@@ -43,7 +43,10 @@ First public release.
   board's images at the offsets in its `flash_args`.
 - [docs/adding-a-device.md](docs/adding-a-device.md) walks through a port, and
   CONTRIBUTING.md and a new-device issue template cover submitting one.
-  `tools/check_boards.py` (part of `make check`) checks a board directory has everything.
+  `tools/new_board.py` starts a board from the closest existing one, and
+  `tools/check_boards.py` (part of `make check`) checks a board directory has everything,
+  its demo screenshot (`assets/boards/<id>.png`) included.
+- `install.sh --board` reflashes a board whose firmware reports a different board.
 - Works around an ESP32-C6 USB erratum ([espressif/esp-idf#17432](https://github.com/espressif/esp-idf/issues/17432)):
   a power-on boot can leave the USB serial link dead until the chip is reset, so the
   firmware restarts its CPU once at power-on. The host keeps the port through that restart.

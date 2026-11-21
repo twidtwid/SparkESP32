@@ -136,24 +136,28 @@ for your controller (`esp_lcd_<controller>` on the
 
 Start from whichever existing board is closer to yours: the ES3C28P for a color
 panel with an `esp_lcd` driver, the RLCD for a panel you have to drive yourself.
+`tools/new_board.py` copies it and does the mechanical part:
 
 ```bash
-cp -R firmware/boards/lcdwiki-esp32s3-tft-2.8 firmware/boards/acme-esp32s3-lcd-3.5
+python3 tools/new_board.py acme-esp32s3-lcd-3.5 --from lcdwiki-esp32s3-tft-2.8
+python3 tools/new_board.py acme-esp32c3-oled-1.3 --from lcdwiki-esp32s3-tft-2.8 --chip esp32c3
 ```
 
-Delete the copy's `dependencies.lock`; your first build writes a new one.
+It sets `BOARD_ID`, points `sdkconfig.defaults` at the new board's own partition table
+(and chip, with `--chip`), drops the copied `dependencies.lock` (your first build
+writes one), replaces the README with a skeleton, and lists the board in
+`firmware/boards/README.md`. Then edit:
 
-Then edit:
-
-- **`board/include/board_config.h`**: `BOARD_ID` (the directory name), the UI size, and the mono flag.
-- **`sdkconfig.defaults`**: `CONFIG_IDF_TARGET`, the flash size, PSRAM if any, and
-  `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/<id>/partitions.csv"`. Keep
-  `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`.
+- **`board/include/board_config.h`**: the UI size and the mono flag.
+- **`sdkconfig.defaults`**: the flash size, and PSRAM if any (remove the copied PSRAM
+  lines if your board has none). Keep `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`.
 - **`partitions.csv`**: the shared layout fits 8 MB and up. For 4 MB, shrink the app slot to `3M`.
 - **`board/CMakeLists.txt`**: your source files, `REQUIRES board_api`, and in
   `PRIV_REQUIRES` the drivers you use (`esp_lcd`, `esp_driver_spi`, `esp_driver_i2c`, ...).
 - **`board/idf_component.yml`**: LVGL (`lvgl/lvgl: "^9.6.0"`) and any panel driver component.
-- **`firmware/boards/README.md`**: add a row for your board, in backticks.
+- **`firmware/boards/README.md`**: the display column of your board's row.
+
+`python3 tools/check_boards.py` (part of `make check`) lists whatever is still missing.
 
 ### 4. Write `board_init()`
 
@@ -233,7 +237,7 @@ Run the whole list, on the real board, and keep the output for your pull request
 | Check | How | Pass |
 |---|---|---|
 | Handshake | `python3 tools/devctl.py status` | first data line `fw=sparkesp32 version=... board=<id>` |
-| Render | `python3 tools/devctl.py demoshot <id>.png 70` | every element in place, nothing clipped or overlapping |
+| Render | `python3 tools/devctl.py demoshot assets/boards/<id>.png 70` | every element in place, nothing clipped or overlapping. This becomes the board's screenshot in the repo (for a 1-bit panel, store what the panel shows: your driver's threshold applied to it) |
 | The physical screen | a photo of the board showing the demo | matches the screenshot: upright, not mirrored, not inverted, nothing shifted |
 | Rotations | `devctl.py rot cw`, `rot ccw`, `rot none` | each one either redraws correctly or is refused with `ERR rot ... not supported` |
 | Wi-Fi | `python3 tools/provision.py --ssids "<net>" --host <spark>.local`, then `devctl.py wifi` and `devctl.py status` | `link state=connected`, then `screen=online reason='via WI-FI'` with live values |
