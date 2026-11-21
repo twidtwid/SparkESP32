@@ -4,8 +4,8 @@
 
 The DGX Spark has no power LED and nothing on the outside that tells you what it's doing.
 SparkESP32 puts a 2.16" 480×480 AMOLED next to it that shows CPU, GPU and unified-memory
-load, a per-core heatmap, device temperature and power draw, and a big **ONLINE / OFFLINE**
-state that doubles as the power light.
+load, the GPU clock, a per-core heatmap, device temperature and power draw, and a big
+**ONLINE / OFFLINE** state that doubles as the power light.
 
 ![SparkESP32 on a DGX Spark](assets/social-preview.png)
 
@@ -16,6 +16,11 @@ state that doubles as the power light.
   from `/proc`. Memory is shown in decimal GB, so it matches NVIDIA's dashboard (99 GB of 131 GB).
 - **Tells you when it doesn't know.** A missing reading shows as `--`, never as a fake zero.
   A feed that stops turns the screen to OFFLINE within 5 seconds.
+- **Catches the GB10 stuck clock.** Some GB10 machines get stuck running the GPU at
+  500–850 MHz under load, with nothing in the logs and no throttle reason. A reboot doesn't
+  clear it; a full power drain does. The GPU ring shows the clock. When the agent sees that
+  state, the ring turns amber and the line under ONLINE reads **CLOCK STUCK**
+  ([what to do](docs/troubleshooting.md#clock-stuck)).
 
 > Unofficial hobby project. Not affiliated with or endorsed by NVIDIA. "NVIDIA" and
 > "DGX Spark" are trademarks of NVIDIA Corporation.
@@ -154,6 +159,11 @@ Over USB alone, OFFLINE has no second line: the board can't tell why samples sto
 Rings and the heatmap dim to grey whenever the data is stale. A reading the Spark can't
 provide (e.g. `nvidia-smi` missing) shows `--`.
 
+The small number in the GPU ring is the GPU clock. When the GPU has run under load at
+under 1000 MHz with no throttle reason for 10 seconds, the ring turns amber and the line
+under ONLINE reads **CLOCK STUCK**: the GB10's stuck-clock state, which only a full power
+drain clears (see [docs/troubleshooting.md](docs/troubleshooting.md#clock-stuck)).
+
 ## For agents
 
 If you're an AI coding agent asked to set this up for someone, follow
@@ -166,7 +176,7 @@ of done, and the one rule that matters: **the human types the Wi-Fi password, ne
 DGX Spark                                         ESP32-C6 AMOLED
 ┌──────────────────────────────────┐   USB-C    ┌──────────────────────────┐
 │ sparkesp32-agent (systemd, 1 Hz) │ ─────────► │ console `stat` line      │
-│   nvidia-smi   GPU %, temp, power│   serial   │          │               │
+│   nvidia-smi   GPU %, MHz, °C, W │   serial   │          │               │
 │   /proc/stat   CPU % + each core │            │          ▼  USB wins     │
 │   /proc/meminfo unified memory   │            │  one strict parser       │
 │                                  │   Wi-Fi    │          ▲  while fresh  │
@@ -175,7 +185,7 @@ DGX Spark                                         ESP32-C6 AMOLED
 ```
 
 Both transports carry the same one-line text format
-(`stat 6 91 46328 130661 60 410 1,1,0,... spark-1a2b`), described in
+(`stat 6 91 46328 130661 60 410 1,1,0,... spark-1a2b 2405 0`), described in
 [docs/protocol.md](docs/protocol.md). The agent is a few hundred lines of stdlib Python plus
 pyserial. The firmware is ESP-IDF 5.5 + LVGL 9.
 

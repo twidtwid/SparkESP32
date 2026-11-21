@@ -11,6 +11,7 @@
 spark_t g_spark = {
     .cpu = SPARK_UNKNOWN, .gpu = SPARK_UNKNOWN, .mem_used_mb = SPARK_UNKNOWN,
     .mem_total_mb = SPARK_UNKNOWN, .temp_c = SPARK_UNKNOWN, .power_dw = SPARK_UNKNOWN,
+    .gpu_mhz = SPARK_UNKNOWN, .gpu_stuck = SPARK_UNKNOWN,
 };
 
 uint32_t spark_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
@@ -79,7 +80,10 @@ static bool parse_host(const char *tok, char *out)
 
 int spark_apply_args(int argc, char **argv, spark_src_t src, const char **why)
 {
-    if (argc != 9 || strcmp(argv[0], "stat") != 0) { *why = "expected 8 fields"; return -1; }
+    if ((argc != 9 && argc != 11) || strcmp(argv[0], "stat") != 0) {
+        *why = "expected 8 or 10 fields";
+        return -1;
+    }
 
     spark_t s = {0};
     if (!parse_field(argv[1], 0, 100, &s.cpu))             { *why = "cpu";   return -1; }
@@ -90,6 +94,11 @@ int spark_apply_args(int argc, char **argv, spark_src_t src, const char **why)
     if (!parse_field(argv[6], 0, 100000, &s.power_dw))     { *why = "power"; return -1; }
     if (!parse_cores(argv[7], s.cores, &s.ncores))         { *why = "cores"; return -1; }
     if (!parse_host(argv[8], s.host))                      { *why = "host";  return -1; }
+    s.gpu_mhz = s.gpu_stuck = SPARK_UNKNOWN;               // v1: an agent from before the clock
+    if (argc == 11) {
+        if (!parse_field(argv[9], 0, 10000, &s.gpu_mhz))   { *why = "gpu_mhz";   return -1; }
+        if (!parse_field(argv[10], 0, 1, &s.gpu_stuck))    { *why = "gpu_stuck"; return -1; }
+    }
 
     s.source = src;
     s.fed_ms = spark_now_ms();
@@ -105,7 +114,7 @@ void spark_demo(int load)
     spark_t s = {
         .valid = true, .cpu = load, .gpu = load / 2,
         .mem_used_mb = 98591, .mem_total_mb = 130661,
-        .temp_c = 35 + load / 10, .power_dw = 106 + load * 4,
+        .temp_c = 35 + load / 10, .power_dw = 106 + load * 4, .gpu_mhz = 2405, .gpu_stuck = 0,
         .ncores = 20, .host = "spark-demo", .source = SRC_USB, .fed_ms = spark_now_ms(),
     };
     for (int i = 0; i < 20; i++) {

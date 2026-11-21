@@ -276,11 +276,15 @@ static int http_get(const char *url, char *buf, int cap, poll_info_t *pi)
 static void poll_once(void)
 {
     static char body[512];
-    char url[URL_MAX + 1];
+    char url[URL_MAX + 8];                         // + "?v=N"
     LOCK();
     strlcpy(url, s_url, sizeof(url));
     UNLOCK();
     if (!url[0] || !net_wifi_is_connected()) return;
+    // Ask for the newest protocol the parser reads. Agents from before v2 ignore the query
+    // and answer v1, which the parser still takes (docs/protocol.md).
+    size_t n = strlen(url);
+    snprintf(url + n, sizeof(url) - n, "%cv=%d", strchr(url, '?') ? '&' : '?', SPARK_PROTO);
 
     if (display_lock(500) != ESP_OK) return;
     bool usb_fresh = g_spark.valid && g_spark.source == SRC_USB && spark_age_ms() < SPARK_USB_FRESH_MS;
@@ -290,14 +294,14 @@ static void poll_once(void)
     poll_info_t pi;
     int rc = -1;
     if (http_get(url, body, sizeof(body), &pi) > 0) {
-        char *argv[10];
+        char *argv[12];             // a v2 line is 11 tokens; one more catches a longer one
         int argc = 0;
         char *tok = NULL;
-        for (char *t = strtok_r(body, " \t\r\n", &tok); t && argc < 10; t = strtok_r(NULL, " \t\r\n", &tok))
+        for (char *t = strtok_r(body, " \t\r\n", &tok); t && argc < 12; t = strtok_r(NULL, " \t\r\n", &tok))
             argv[argc++] = t;
         // too many fields is usually an agent speaking an older protocol: say so plainly
         const char *why = "too many fields: update the agent";
-        if (argc < 10) {
+        if (argc < 12) {
             if (display_lock(1000) != ESP_OK) { s_poll_err++; return; }
             rc = spark_apply_args(argc, argv, SRC_WIFI, &why);
             if (rc == 0) ui_update();

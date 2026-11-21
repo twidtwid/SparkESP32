@@ -49,9 +49,10 @@ int main(void)
     // ---- before any sample, every field is unknown (the screen shows "--")
     CHECK(!g_spark.valid && g_spark.cpu == SPARK_UNKNOWN && g_spark.gpu == SPARK_UNKNOWN &&
           g_spark.temp_c == SPARK_UNKNOWN && g_spark.power_dw == SPARK_UNKNOWN &&
+          g_spark.gpu_mhz == SPARK_UNKNOWN && g_spark.gpu_stuck == SPARK_UNKNOWN &&
           g_spark.ncores == 0 && spark_mem_pct() == SPARK_UNKNOWN, "unfed state is unknown");
 
-    // ---- a real 20-core Spark sample, as sparkesp32-agent sends it
+    // ---- a real 20-core Spark sample, as sparkesp32-agent sends it (protocol v1)
     g_fake_us = 5000000;
     accepts("stat 6 91 46328 130661 60 410 1,1,1,2,0,0,1,0,1,1,0,0,1,1,1,1,99,1,0,0 spark-1a2b");
     CHECK(g_spark.valid && g_spark.cpu == 6 && g_spark.gpu == 91, "cpu/gpu");
@@ -60,6 +61,21 @@ int main(void)
     CHECK(g_spark.ncores == 20 && g_spark.cores[16] == 99, "cores");
     CHECK(g_spark.source == SRC_USB && g_spark.fed_ms == 5000, "source/fed_ms");
     CHECK(spark_mem_pct() == 35, "mem pct %d", spark_mem_pct());
+    CHECK(g_spark.gpu_mhz == SPARK_UNKNOWN && g_spark.gpu_stuck == SPARK_UNKNOWN, "v1: no clock");
+
+    // ---- protocol v2: the GPU clock and the stuck-clock verdict on the end
+    accepts("stat 6 91 46328 130661 60 410 1,1,1,2 spark-1a2b 2405 0");
+    CHECK(g_spark.gpu_mhz == 2405 && g_spark.gpu_stuck == 0, "v2 clock %d stuck %d",
+          (int)g_spark.gpu_mhz, (int)g_spark.gpu_stuck);
+    CHECK(g_spark.gpu == 91 && g_spark.ncores == 4 && strcmp(g_spark.host, "spark-1a2b") == 0, "v2 rest");
+    accepts("stat 6 96 46328 130661 45 165 1,1 spark-1a2b 663 1");
+    CHECK(g_spark.gpu_mhz == 663 && g_spark.gpu_stuck == 1, "stuck");
+    accepts("stat 6 96 46328 130661 45 165 1,1 spark-1a2b - -");
+    CHECK(g_spark.gpu_mhz == SPARK_UNKNOWN && g_spark.gpu_stuck == SPARK_UNKNOWN, "v2 unknowns");
+    accepts("stat 6 96 46328 130661 45 165 1,1 spark-1a2b 0 -");
+    accepts("stat 6 96 46328 130661 45 165 1,1 spark-1a2b 10000 1");
+    accepts("stat 6 91 46328 130661 60 410 1,1 spark-1a2b");               // back to v1: clock unknown
+    CHECK(g_spark.gpu_mhz == SPARK_UNKNOWN && g_spark.gpu_stuck == SPARK_UNKNOWN, "v1 after v2");
 
     // ---- unknowns
     accepts("stat - - - - - - - -");
@@ -75,10 +91,17 @@ int main(void)
 
     // ---- rejects, with the field named and g_spark untouched
     accepts("stat 50 50 1000 2000 40 100 5,5 good");
-    rejects("stat 50 50 1000", "expected 8 fields");
-    rejects("stat 50 50 1000 2000 40 100 5,5 h extra", "expected 8 fields");
-    rejects("stat 50 50 1000 2000 40 100 5,5", "expected 8 fields");    // pre-host 8-token form
-    rejects("stats 50 50 1000 2000 40 100 5", "expected 8 fields");
+    rejects("stat 50 50 1000", "expected 8 or 10 fields");
+    rejects("stat 50 50 1000 2000 40 100 5,5 h 2405", "expected 8 or 10 fields");     // half a v2
+    rejects("stat 50 50 1000 2000 40 100 5,5 h 2405 0 x", "expected 8 or 10 fields");
+    rejects("stat 50 50 1000 2000 40 100 5,5", "expected 8 or 10 fields");    // pre-host 8-token form
+    rejects("stats 50 50 1000 2000 40 100 5", "expected 8 or 10 fields");
+    rejects("stats 50 50 1000 2000 40 100 5 h 2405 0", "expected 8 or 10 fields");
+    rejects("stat 50 50 1000 2000 40 100 5 h 10001 0", "gpu_mhz");
+    rejects("stat 50 50 1000 2000 40 100 5 h -1 0", "gpu_mhz");
+    rejects("stat 50 50 1000 2000 40 100 5 h 2.4G 0", "gpu_mhz");
+    rejects("stat 50 50 1000 2000 40 100 5 h 2405 2", "gpu_stuck");
+    rejects("stat 50 50 1000 2000 40 100 5 h 2405 yes", "gpu_stuck");
     rejects("stat 101 50 1000 2000 40 100 5 h", "cpu");
     rejects("stat -1 50 1000 2000 40 100 5 h", "cpu");
     rejects("stat 5x 50 1000 2000 40 100 5 h", "cpu");

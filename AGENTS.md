@@ -127,7 +127,10 @@ docs/                      protocol.md, troubleshooting.md, adding-a-device.md
   board=<id>`), then `python3 tools/devctl.py demoshot /tmp/s.png 70` and look at the PNG.
 - **Protocol changes** touch four places at once: `firmware/main/spark_data.c`,
   `agent/sparkesp32_agent.py`, `tests/`, and `docs/protocol.md`. The console splits on
-  spaces with a 32-token cap, so keep each sample to a few tokens.
+  spaces with a 32-token cap, so keep each sample to a few tokens. Boards and agents get
+  updated separately, so a change must keep the older half working: add fields at the end,
+  keep the parser taking the older form, and send the new form only to a board that asks
+  for it (`proto=N` in the handshake, `?v=N` on `/stat`; see docs/protocol.md).
 - Console replies always end in a line starting with `OK` or `ERR` (or a `*-END` marker
   for multi-line output, which an `ERR ...` line can replace when the command can't run).
   `tools/sparklink.py` depends on that.

@@ -44,7 +44,7 @@ import sparklink  # noqa: E402
 # ------------------------------------------------------------------ agent
 
 class FakeGpu:
-    def __init__(self, values=(91, 60, 410), state="streaming"):
+    def __init__(self, values=(91, 60, 410, 2405, 0), state="streaming"):
         self.values, self.state, self.error, self.started = values, state, None, False
 
     def ensure_started(self):
@@ -64,7 +64,7 @@ class SamplerTest(unittest.TestCase):
                                  setattr(agent, "read_mem_mb", orig[1])))
         return agent.Sampler(gpu)
 
-    def test_line_is_protocol_v1(self):
+    def test_line_is_protocol_v2(self):
         # aggregate + 3 cores: (idle, total) pairs, 1 s apart
         s = self.make(FakeGpu(), [
             [(100, 200), (10, 50), (10, 50), (10, 50)],
@@ -72,21 +72,49 @@ class SamplerTest(unittest.TestCase):
         ])
         s.tick()
         line, at, sample = s.latest()
-        self.assertEqual(line, "stat 50 91 46328 130661 60 410 0,50,100 " + agent.short_hostname())
-        self.assertEqual(len(line.split()), 9)
-        self.assertEqual(sample["power_w"], 41.0)
+        # one loaded reading at 2405 MHz: too soon to call the clock either way, so "-"
+        host = agent.short_hostname()
+        self.assertEqual(line, f"stat 50 91 46328 130661 60 410 0,50,100 {host} 2405 -")
+        self.assertEqual(len(line.split()), 11)
+        self.assertEqual((sample["power_w"], sample["gpu_mhz"], sample["gpu_clock_events"],
+                          sample["gpu_clock_stuck"]), (41.0, 2405, 0, None))
         self.assertGreater(at, 0)
 
+    def test_v1_line_is_the_v2_line_without_the_clock(self):
+        v2 = "stat 50 91 46328 130661 60 410 0,50,100 spark-1a2b 2405 0"
+        self.assertEqual(agent.wire_line(v2, 1), "stat 50 91 46328 130661 60 410 0,50,100 spark-1a2b")
+        self.assertEqual(agent.wire_line(v2, 2), v2)
+        self.assertEqual(agent.wire_line(v2, 3), v2)
+
+    def test_a_stuck_clock_goes_out_as_1(self):
+        times = [[(0, 100 * i)] * 2 for i in range(12)]
+        s = self.make(FakeGpu((96, 45, 165, 663, 0)), times)
+        for _ in range(agent.STUCK_AFTER - 1):
+            s.tick()
+        self.assertTrue(s.latest()[0].endswith(" 663 -"))
+        with self.assertLogs("sparkesp32", "WARNING") as logs:
+            s.tick()
+        line, _, sample = s.latest()
+        self.assertTrue(line.endswith(" 663 1"), line)
+        self.assertIs(sample["gpu_clock_stuck"], True)
+        self.assertIn("stuck", logs.output[0])
+
+    def test_a_clock_the_firmware_would_reject_is_unknown(self):
+        for mhz in (-1, agent.MHZ_MAX + 1):
+            s = self.make(FakeGpu((10, 45, 165, mhz, 0)), [[(0, 0)] * 2, [(0, 100)] * 2])
+            s.tick()
+            self.assertTrue(s.latest()[0].endswith(" - -"), mhz)
+
     def test_unknown_gpu_fields_are_dashes(self):
-        s = self.make(FakeGpu((None, None, None), "nvidia-smi unavailable"),
+        s = self.make(FakeGpu(agent.UNKNOWN_GPU, "nvidia-smi unavailable"),
                       [[(0, 0), (0, 0)], [(0, 100), (50, 100)]])
         s.tick()
-        self.assertEqual(s.latest()[0], "stat 100 - 46328 130661 - - 50 " + agent.short_hostname())
+        self.assertEqual(s.latest()[0], "stat 100 - 46328 130661 - - 50 " + agent.short_hostname() + " - -")
 
     def test_big_machine_line_fits_the_console_buffer(self):
         # 144 cores, every value 3 digits, a 63-char hostname: worst case
         n = 144
-        s = self.make(FakeGpu((100, 150, 100000)),
+        s = self.make(FakeGpu((100, 150, 100000, agent.MHZ_MAX, 0)),
                       [[(0, 0)] * (n + 1), [(0, 100)] * (n + 1)], mem=(2**31 - 1, 2**31 - 1))
         s.host = "h" * 63
         s.tick()
@@ -111,7 +139,7 @@ class SamplerTest(unittest.TestCase):
         class Up:
             def read(self):
                 return dict(cpu=7, gpu=33, mem_used_mb=99646, mem_total_mb=130661, temp_c=36,
-                            power_dw=107, cores=[1, 2, 3])
+                            power_dw=107, gpu_mhz=2405, gpu_events=0, cores=[1, 2, 3])
 
             def health(self):
                 return {"url": "http://x:9750", "state": "ok", "error": None}
@@ -120,7 +148,7 @@ class SamplerTest(unittest.TestCase):
         s.sparkline = Up()
         s.tick()
         line, _, sample = s.latest()
-        self.assertEqual(line, "stat 7 33 99646 130661 36 107 1,2,3 " + agent.short_hostname())
+        self.assertEqual(line, "stat 7 33 99646 130661 36 107 1,2,3 " + agent.short_hostname() + " 2405 -")
         self.assertEqual((sample["source"], sample["sparkline"]["state"]), ("sparkline", "ok"))
         self.assertFalse(gpu.started)              # no nvidia-smi while Sparkline answers
 
@@ -136,7 +164,7 @@ class SamplerTest(unittest.TestCase):
         s.sparkline = Down()
         s.tick()
         line, _, sample = s.latest()
-        self.assertEqual(line, "stat 100 91 46328 130661 60 410 50 " + agent.short_hostname())
+        self.assertEqual(line, "stat 100 91 46328 130661 60 410 50 " + agent.short_hostname() + " 2405 -")
         self.assertEqual(sample["source"], "own")
         self.assertTrue(gpu.started)
 
@@ -150,13 +178,16 @@ class SamplerTest(unittest.TestCase):
         self.assertEqual(agent.GpuReader._num(" 42 "), 42)
         self.assertEqual(agent.GpuReader._num("10.6", 10), 106)
         self.assertIsNone(agent.GpuReader._num("[N/A]"))
+        self.assertEqual(agent.GpuReader._mask(" 0x0000000000000000"), 0)
+        self.assertEqual(agent.GpuReader._mask("0x0000000000000044"), 0x44)
+        self.assertIsNone(agent.GpuReader._mask("[N/A]"))
 
     def test_gpu_reader_goes_stale(self):
         g = agent.GpuReader(threading.Event())
-        g.reading = ((1, 2, 3), time.monotonic())
-        self.assertEqual(g.latest(), (1, 2, 3))
-        g.reading = ((1, 2, 3), time.monotonic() - agent.GPU_STALE_S - 1)
-        self.assertEqual(g.latest(), (None, None, None))
+        g.reading = ((1, 2, 3, 4, 5), time.monotonic())
+        self.assertEqual(g.latest(), (1, 2, 3, 4, 5))
+        g.reading = ((1, 2, 3, 4, 5), time.monotonic() - agent.GPU_STALE_S - 1)
+        self.assertEqual(g.latest(), (None, None, None, None, None))
 
 
 class GpuReaderLifecycleTest(unittest.TestCase):
@@ -186,13 +217,14 @@ class GpuReaderLifecycleTest(unittest.TestCase):
         return [sys.executable, "-c", code]
 
     def test_a_hung_nvidia_smi_is_killed_and_respawned(self):
-        hangs = self.child("import time; print('7, 41, 10.6', flush=True); time.sleep(60)")
+        hangs = self.child("import time; print('7, 41, 10.6, 2405, 0x0000000000000000', flush=True); "
+                           "time.sleep(60)")
 
         def respawned(seen):
             return "stalled" in seen and "streaming" in seen[seen.index("stalled"):]
         g, seen = self.watch(hangs, respawned)
         self.assertTrue(respawned(seen), seen)
-        self.assertEqual(g.reading[0], (7, 41, 106))
+        self.assertEqual(g.reading[0], (7, 41, 106, 2405, 0))
 
     def test_an_exit_is_reported_with_its_stderr(self):
         g, seen = self.watch(self.child("import sys; print('boom', file=sys.stderr); sys.exit(3)"),
@@ -210,7 +242,7 @@ class HttpTest(unittest.TestCase):
     def setUp(self):
         from http.server import ThreadingHTTPServer
         self.sampler = agent.Sampler.__new__(agent.Sampler)
-        self.sampler.snap = ("stat 1 2 3 4 5 6 7 h", time.monotonic(), {"cpu": 1})
+        self.sampler.snap = ("stat 1 2 3 4 5 6 7 h 2405 0", time.monotonic(), {"cpu": 1})
         self.sampler.display = "not connected"
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), agent.make_handler(self.sampler))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -230,8 +262,18 @@ class HttpTest(unittest.TestCase):
 
     def test_stat(self):
         code, body, headers = self.get("/stat")
-        self.assertEqual((code, body), (200, "stat 1 2 3 4 5 6 7 h\n"))
+        self.assertEqual((code, body), (200, "stat 1 2 3 4 5 6 7 h\n"))     # v1, for older displays
         self.assertEqual(headers["Content-Length"], str(len(body)))   # firmware requires it
+
+    def test_stat_v2_on_request(self):
+        for query, want in [("?v=2", "stat 1 2 3 4 5 6 7 h 2405 0\n"),
+                            ("?v=3", "stat 1 2 3 4 5 6 7 h 2405 0\n"),      # newer than us: our newest
+                            ("?x=1&v=2", "stat 1 2 3 4 5 6 7 h 2405 0\n"),
+                            ("?v=1", "stat 1 2 3 4 5 6 7 h\n"),
+                            ("?v=two", "stat 1 2 3 4 5 6 7 h\n"),
+                            ("?", "stat 1 2 3 4 5 6 7 h\n")]:
+            with self.subTest(query=query):
+                self.assertEqual(self.get("/stat" + query)[:2], (200, want))
 
     def test_stale_is_503(self):
         line, at, sample = self.sampler.snap
@@ -246,6 +288,74 @@ class HttpTest(unittest.TestCase):
 
     def test_unknown_path_404(self):
         self.assertEqual(self.get("/nope")[0], 404)
+
+
+class ClockWatchTest(unittest.TestCase):
+    """The GB10 stuck-clock detector, fed one (util %, SM MHz, event mask) reading a second."""
+
+    STUCK, HEALTHY, IDLE = (96, 663, 0), (96, 2405, 0x4), (0, 2405, 0x1)
+
+    def feed(self, w, reading, n=1):
+        for _ in range(n):
+            got = w.update(*reading)
+        return got
+
+    def test_unknown_until_there_is_load(self):
+        w = agent.ClockWatch()
+        self.assertIsNone(self.feed(w, self.IDLE, 100))
+        self.assertIsNone(self.feed(w, (None, 663, 0), 100))        # no utilization reading
+        self.assertIsNone(self.feed(w, (96, None, 0), 100))         # no clock reading
+
+    def test_sustained_low_clock_under_load_is_stuck(self):
+        w = agent.ClockWatch()
+        self.assertIsNone(self.feed(w, self.STUCK, agent.STUCK_AFTER - 1))
+        with self.assertLogs("sparkesp32", "WARNING"):
+            self.assertIs(self.feed(w, self.STUCK), True)
+
+    def test_a_bursty_workload_adds_up_across_idle_gaps(self):
+        w = agent.ClockWatch()
+        for _ in range(agent.STUCK_AFTER - 1):
+            self.feed(w, self.STUCK)
+            self.feed(w, self.IDLE, 3)
+        with self.assertLogs("sparkesp32", "WARNING"):
+            self.assertIs(self.feed(w, self.STUCK), True)
+
+    def test_an_event_reason_explains_a_low_clock(self):
+        for mask in (0x2, 0x4, 0x8, 0x20, 0x40, 0x80):               # app clocks, power cap, slowdowns
+            with self.subTest(mask=hex(mask)):
+                w = agent.ClockWatch()
+                self.assertIsNone(self.feed(w, (96, 663, mask), 3 * agent.STUCK_AFTER))
+        w = agent.ClockWatch()                                       # idle alone explains nothing,
+        with self.assertLogs("sparkesp32", "WARNING"):               # and no mask counts as no reason
+            self.assertIs(self.feed(w, (96, 663, 0x1), agent.STUCK_AFTER), True)
+        w = agent.ClockWatch()
+        with self.assertLogs("sparkesp32", "WARNING"):
+            self.assertIs(self.feed(w, (96, 663, None), agent.STUCK_AFTER), True)
+
+    def test_an_explained_or_middling_reading_restarts_the_count(self):
+        for between in ((96, 663, 0x40), (96, 1200, 0)):
+            with self.subTest(between=between):
+                w = agent.ClockWatch()
+                self.feed(w, self.STUCK, agent.STUCK_AFTER - 1)
+                self.feed(w, between)
+                self.assertIsNone(self.feed(w, self.STUCK, agent.STUCK_AFTER - 1))
+
+    def test_stuck_holds_through_idle_and_clears_on_a_healthy_clock(self):
+        w = agent.ClockWatch()
+        with self.assertLogs("sparkesp32", "WARNING"):
+            self.feed(w, self.STUCK, agent.STUCK_AFTER)
+        self.assertIs(self.feed(w, self.IDLE, 3600), True)           # idle clocks prove nothing
+        self.assertIs(self.feed(w, self.HEALTHY, agent.HEALTHY_AFTER - 1), True)
+        with self.assertLogs("sparkesp32", "INFO") as logs:
+            self.assertIs(self.feed(w, self.HEALTHY), False)
+        self.assertIn("back to normal", logs.output[0])
+
+    def test_healthy_under_load_is_ok(self):
+        w = agent.ClockWatch()
+        self.assertIsNone(self.feed(w, self.HEALTHY, agent.HEALTHY_AFTER - 1))
+        self.assertIs(self.feed(w, self.HEALTHY), False)
+        self.assertIs(self.feed(w, (96, 1400, 0)), False)            # 1400 counts as healthy
+        self.assertIs(self.feed(w, (96, 999, 0), agent.STUCK_AFTER - 1), False)
 
 
 # ------------------------------------------------------------------ serial tools
@@ -306,14 +416,28 @@ class BootingBoard:
 class AgentHandshakeTest(unittest.TestCase):
     def test_asks_again_while_the_board_boots(self):
         board = BootingBoard(deaf=3)
-        self.assertTrue(agent.handshake(board, timeout=2, every=0.05))
+        self.assertEqual(agent.handshake(board, timeout=2, every=0.05), 1)
         self.assertEqual(board.writes, 4)
 
+    def test_reads_the_boards_protocol(self):
+        for fw, want in [(b"fw=sparkesp32 version=1.1.0 idf=v5.5.6 board=x", 1),      # before v2
+                         (b"fw=sparkesp32 version=1.2.0 idf=v5.5.6 board=x proto=2", 2),
+                         (b"fw=sparkesp32 version=9.0.0 idf=v5.5.6 board=x proto=7", agent.PROTO)]:
+            with self.subTest(fw=fw):
+                self.assertEqual(agent.handshake(BootingBoard(deaf=0, fw=fw), timeout=1, every=0.05), want)
+
+    def test_waits_for_the_whole_handshake_line(self):
+        # the line arrives a few bytes per read: "proto=2" comes after "fw=sparkesp32"
+        reply = ("STATUS-BEGIN\r\nfw=sparkesp32 version=1.2.0 idf=v5.5.6 board=x proto=2\r\n"
+                 "STATUS-END\r\n")
+        board = ChunkedSerial(lambda cmd: reply if cmd == "status" else "")
+        self.assertEqual(agent.handshake(board, timeout=1, every=10), 2)
+
     def test_rejects_other_firmware(self):
-        self.assertFalse(agent.handshake(BootingBoard(deaf=0, fw=b"fw=other"), timeout=0.3, every=0.05))
+        self.assertEqual(agent.handshake(BootingBoard(deaf=0, fw=b"fw=other"), timeout=0.3, every=0.05), 0)
 
     def test_rejects_a_silent_device(self):
-        self.assertFalse(agent.handshake(BootingBoard(deaf=10**6), timeout=0.3, every=0.05))
+        self.assertEqual(agent.handshake(BootingBoard(deaf=10**6), timeout=0.3, every=0.05), 0)
 
 
 class ChunkedSerial(FakeSerial):
@@ -321,6 +445,11 @@ class ChunkedSerial(FakeSerial):
 
     def read(self, n):
         return super().read(min(n, 5))
+
+
+def streaming_to(board):
+    """serial_loop is streaming and has sent `board` a sample"""
+    return lambda d: d["state"] == "streaming" and b"stat " in board.sent
 
 
 class SerialLoopTest(unittest.TestCase):
@@ -331,8 +460,9 @@ class SerialLoopTest(unittest.TestCase):
             saved = agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S
             agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S = (
                 lambda: [dev.name]), open_port, 0.3
+            line = "stat 1 2 3 4 5 6 7 h 2405 0"
             sampler = types.SimpleNamespace(display={"state": "searching"},
-                                            latest=lambda: ("stat 1 2 3 4 5 6 7 h", time.monotonic(), {}))
+                                            latest=lambda: (line, time.monotonic(), {}))
             stop = threading.Event()
             loop = threading.Thread(target=agent.serial_loop, args=(sampler, None, stop), daemon=True)
             loop.start()
@@ -348,10 +478,16 @@ class SerialLoopTest(unittest.TestCase):
 
     def test_a_display_that_answers_is_streaming(self):
         board = BootingBoard(deaf=0)
-        d, port = self.run_loop(lambda *a, **k: board, lambda d: d["state"] == "streaming")
-        self.assertEqual((d["state"], d["port"]), ("streaming", port))
+        d, port = self.run_loop(lambda *a, **k: board, streaming_to(board))
+        self.assertEqual((d["state"], d["port"], d["proto"]), ("streaming", port, 1))
         self.assertGreaterEqual(d["answered_in_s"], 0)
-        self.assertIn(b"stat 1 2 3 4 5 6 7 h", board.sent)
+        self.assertIn(b"stat 1 2 3 4 5 6 7 h\n", board.sent)      # v1: its firmware didn't say proto=2
+
+    def test_a_v2_display_gets_the_clock(self):
+        board = BootingBoard(deaf=0, fw=b"fw=sparkesp32 version=1.2.0 idf=v5.5.6 board=x proto=2")
+        d, _ = self.run_loop(lambda *a, **k: board, streaming_to(board))
+        self.assertEqual(d["proto"], 2)
+        self.assertIn(b"stat 1 2 3 4 5 6 7 h 2405 0\n", board.sent)
 
     def test_a_silent_device_is_reported_as_rejected(self):
         d, port = self.run_loop(lambda *a, **k: BootingBoard(deaf=10**6), lambda d: d["state"] == "rejected")
@@ -511,15 +647,25 @@ class SnapshotFieldsTest(unittest.TestCase):
         self.assertEqual((got["cpu"], got["gpu"], got["mem_used_mb"], got["mem_total_mb"]),
                          (0, 0, 99646, 130661))
         self.assertEqual((got["temp_c"], got["power_dw"]), (36, 107))
+        self.assertEqual((got["gpu_mhz"], got["gpu_events"]), (2405, 0))
         self.assertEqual(len(got["cores"]), 20)
+
+    def test_clock_fields_are_optional(self):
+        s = snapshot()
+        del s["gpu"][0]["sm_mhz"], s["gpu"][0]["throttle_mask"]     # a Sparkline without them
+        got = agent.snapshot_fields(s)
+        self.assertEqual((got["gpu_mhz"], got["gpu_events"]), (None, None))
+        s["gpu"][0].update(sm_mhz=663.4, throttle_mask="0x0")        # a mask that isn't a number
+        got = agent.snapshot_fields(s)
+        self.assertEqual((got["gpu_mhz"], got["gpu_events"]), (663, None))
 
     def test_clamps_and_unknowns(self):
         s = snapshot()
         s["cpu"]["util"], s["cpu"]["per_core"][0] = 100.4, -0.2
-        s["gpu"][0].update(util=None, temp_c=None, power_w=None)
+        s["gpu"][0].update(util=None, temp_c=None, power_w=None, sm_mhz=None)
         got = agent.snapshot_fields(s)
         self.assertEqual((got["cpu"], got["cores"][0]), (100, 0))
-        self.assertEqual((got["gpu"], got["temp_c"], got["power_dw"]), (None, None, None))
+        self.assertEqual((got["gpu"], got["temp_c"], got["power_dw"], got["gpu_mhz"]), (None,) * 4)
         self.assertEqual(agent.snapshot_fields(snapshot(gpu=[]))["gpu"], None)   # no GPU at all
 
     def test_rejects_what_it_doesnt_recognize(self):

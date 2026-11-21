@@ -99,6 +99,37 @@ after 3 failed joins.
 The board is on Wi-Fi but has no agent address. Run `sudo ./install.sh --host <spark-name>.local`,
 or `--host <ip>`.
 
+## CLOCK STUCK
+
+![The C6 display showing CLOCK STUCK](../assets/clock-stuck.png)
+
+The GPU ring turned amber and the line under ONLINE reads **CLOCK STUCK** (on the
+black-and-white RLCD, that line and the GPU ring's title are inverted): the GPU has run
+under load (80 %+ utilization) at under 1000 MHz,
+with no throttle reason, for 10 seconds. That's the GB10's stuck-clock state, reported on
+DGX Spark and its OEM versions: the GPU runs at 500–850 MHz and ~15–20 W instead of
+~2,000–2,400 MHz and ~90 W, so everything on it takes two to three times as long, and
+nothing in the logs says why.
+
+- **A reboot doesn't clear it**, and `nvidia-smi -lgc` is accepted and ignored.
+- **A full power drain does:** shut the Spark down, unplug its power adapter from the wall
+  and from the Spark (and its USB devices), wait at least 5 minutes, then plug the adapter
+  into the wall first and the Spark last, and power on. Some owners needed a longer wait.
+- If it comes back, NVIDIA's moderators are collecting cases in
+  [this forum thread](https://forums.developer.nvidia.com/t/386060), with what to capture
+  (`sudo nvidia-bug-report.sh`, `nvidia-smi -q -d CLOCK,POWER,TEMPERATURE,PERFORMANCE`)
+  before the power drain.
+
+What the agent saw is in `/healthz` (`gpu`, `gpu_mhz`, `gpu_clock_events`: the active
+clock event reasons, `0` for none, and `gpu_clock_stuck`) and in its log
+(`journalctl -u sparkesp32 | grep "GPU clock"`). The warning clears by itself after
+5 seconds under load at 1400 MHz or more. A slowdown that reports a reason (too hot, a power
+brake, a power cap, an application clock limit) never counts as stuck. How the agent
+decides is in [protocol.md](protocol.md#the-stuck-clock-verdict).
+
+The number under the GPU % is the clock either way. If there's no number, the agent or
+the firmware predates it: update both with `sudo ./install.sh`.
+
 ## GPU, temperature or power show `--`
 
 The agent couldn't read them. If `/healthz` → `"source"` is `"sparkline"`, they come from

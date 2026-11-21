@@ -2,7 +2,8 @@
 """sparkesp32-agent: DGX Spark vitals for the SparkESP32 display.
 
 Samples once a second:
-    nvidia-smi     -> GPU %, temperature (C), power (W)   [one long-lived child]
+    nvidia-smi     -> GPU %, temperature (C), power (W), SM clock (MHz) and the
+                      clock event reasons                  [one long-lived child]
     /proc/stat     -> CPU % (aggregate + per core)
     /proc/meminfo  -> unified memory used/total (decimal MB, matches NVIDIA's GB)
 
@@ -11,9 +12,11 @@ up to use it (install.sh does that), reads the same values from Sparkline's
 /api/v1/snapshot instead, and falls back to sampling itself if Sparkline stops
 answering.
 
-and publishes the same `stat` line (protocol v1, see docs/protocol.md) two ways:
+It watches the GPU clock for the GB10's stuck-clock state (see ClockWatch), and
+publishes the same `stat` line (protocol v2, see docs/protocol.md) two ways:
     1. USB serial: pushed to the display while it's plugged in
     2. HTTP: GET /stat on :8787, polled by the display over Wi-Fi; GET /healthz is JSON
+A display whose firmware predates protocol v2 gets the v1 line it understands.
 
 The serial side only talks to a device that matches the display's USB ID *and*
 answers the `status` handshake with `fw=sparkesp32`, so other serial gadgets on
@@ -30,7 +33,9 @@ import subprocess
 import sys
 import threading
 import time
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -53,10 +58,29 @@ MAX_CORES = 32                        # what the display shows; also keeps a lin
                                       # the firmware console's line buffer
 GPU_STALE_S = 5.0                     # nvidia-smi values older than this are reported unknown
 GPU_STALL_S = 10.0                    # it prints a line a second: this long silent, it's hung
-NVSMI = ["nvidia-smi", "-i", "0", "--query-gpu=utilization.gpu,temperature.gpu,power.draw",
-         "--format=csv,noheader,nounits", "-lms", "1000"]
+NVSMI = ["nvidia-smi", "-i", "0", "--query-gpu=utilization.gpu,temperature.gpu,power.draw,"
+         "clocks.sm,clocks_event_reasons.active", "--format=csv,noheader,nounits", "-lms", "1000"]
+NVSMI_FIELDS = 5
+PROTO = 2                             # the newest wire protocol this agent speaks
+V1_TOKENS = 9                         # a v1 line is a v2 line without its last two fields
+MHZ_MAX = 10000                       # the firmware's range for gpu_mhz
+
+# The GB10 stuck-clock state (NVIDIA forum threads 386060, 387029 and 376039): under load the
+# GPU runs at 500-850 MHz and ~20 W instead of ~2,000-2,400 MHz, reports no clock event
+# reason, survives a reboot, and only a full power drain clears it. The thresholds are the
+# ones the community's detector uses (github.com/lcasarin-maker/blackbox): stuck below
+# 1000 MHz with load and no reason, healthy from 1400 MHz. Idle clocks float, so they say nothing.
+LOADED_PCT = 80                       # GPU utilization from which the clock is telling
+STUCK_MHZ = 1000                      # loaded, below this, no event reason: looks stuck
+HEALTHY_MHZ = 1400                    # loaded, at or above this: not stuck
+STUCK_AFTER = 10                      # loaded samples in a row that look stuck before saying so
+HEALTHY_AFTER = 5                     # loaded samples in a row that look healthy to clear it
+IDLE_REASON = 0x1                     # NVML's GpuIdle event reason: not a limit
 SPARKLINE_TIMEOUT_S = 1.5             # one snapshot request; slower than this counts as a failure
 SPARKLINE_RETRY_S = 30.0              # after a failure, sample ourselves this long before asking again
+
+
+UNKNOWN_GPU = (None,) * NVSMI_FIELDS
 
 
 class RateLimitedLog:
@@ -114,7 +138,8 @@ class GpuReader(threading.Thread):
     """Keeps one `nvidia-smi -lms 1000` child running and remembers its latest line.
 
     Sampling never waits on nvidia-smi: fields older than GPU_STALE_S go out as
-    unknown ("-"). The child's state, published in /healthz as gpu_source:
+    unknown ("-"). A reading is (gpu_pct, temp_c, power_dw, sm_mhz, event_mask). The
+    child's state, published in /healthz as gpu_source:
       idle         not started: the readings come from Sparkline (see /healthz "source")
       starting     spawned, no line yet
       streaming    a line a second
@@ -126,7 +151,7 @@ class GpuReader(threading.Thread):
     def __init__(self, stop):
         super().__init__(daemon=True, name="gpu")
         self.stop, self.state, self.error = stop, "idle", None
-        self.reading = ((None, None, None), 0.0)   # (values, monotonic time); replaced whole
+        self.reading = (UNKNOWN_GPU, 0.0)          # (values, monotonic time); replaced whole
         self.first = threading.Event()             # set by the first reading
 
     @staticmethod
@@ -134,6 +159,14 @@ class GpuReader(threading.Thread):
         try:
             return round(float(s.strip()) * scale)
         except ValueError:      # "[N/A]" for fields the GPU doesn't report
+            return None
+
+    @staticmethod
+    def _mask(s):
+        """clocks_event_reasons.active, "0x0000000000000000", as an int; None if not reported."""
+        try:
+            return int(s.strip(), 16)
+        except ValueError:
             return None
 
     def ensure_started(self):
@@ -183,17 +216,51 @@ class GpuReader(threading.Thread):
             for line in lines:
                 heard = time.monotonic()
                 f = line.decode(errors="replace").split(",")
-                if len(f) == 3:
-                    values = (self._num(f[0]), self._num(f[1]), self._num(f[2], 10))
+                if len(f) == NVSMI_FIELDS:
+                    values = (self._num(f[0]), self._num(f[1]), self._num(f[2], 10),
+                              self._num(f[3]), self._mask(f[4]))
                     self.reading = (values, time.monotonic())
                     self.state, self.error, got = "streaming", None, True
                     self.first.set()
         return got
 
     def latest(self):
-        """(gpu_pct, temp_c, power_dw), each None when unknown or stale."""
+        """(gpu_pct, temp_c, power_dw, sm_mhz, event_mask), each None when unknown or stale."""
         values, at = self.reading
-        return values if time.monotonic() - at <= GPU_STALE_S else (None, None, None)
+        return values if time.monotonic() - at <= GPU_STALE_S else UNKNOWN_GPU
+
+
+class ClockWatch:
+    """Spots the GB10 stuck-clock state from one GPU reading a second.
+
+    A reading under load (>= LOADED_PCT) looks stuck when the clock is below STUCK_MHZ and
+    no event reason other than idle explains it (a thermal or power slowdown, an application
+    clock limit), and healthy from HEALTHY_MHZ. STUCK_AFTER stuck-looking loaded readings in
+    a row make `stuck` True; HEALTHY_AFTER healthy ones make it False. Readings without load
+    change nothing, so the verdict holds through idle stretches and a bursty workload adds
+    up: the state lasts until the power is drained, which restarts this agent anyway.
+    `stuck` is None until there's been enough load to tell.
+    """
+
+    def __init__(self):
+        self.stuck, self._low, self._high = None, 0, 0
+
+    def update(self, util, mhz, mask):
+        if util is None or mhz is None or util < LOADED_PCT:
+            return self.stuck
+        explained = mask is not None and mask & ~IDLE_REASON
+        self._low = self._low + 1 if mhz < STUCK_MHZ and not explained else 0
+        self._high = self._high + 1 if mhz >= HEALTHY_MHZ else 0
+        if self._low >= STUCK_AFTER and self.stuck is not True:
+            self.stuck = True
+            log.warning("GPU clock stuck: %d MHz at %d%% load with no clock event reason. This is "
+                        "the GB10 stuck-clock state; a reboot won't clear it, a full power drain "
+                        "will (docs/troubleshooting.md)", mhz, util)
+        elif self._high >= HEALTHY_AFTER and self.stuck is not False:
+            if self.stuck:
+                log.info("GPU clock back to normal: %d MHz at %d%% load", mhz, util)
+            self.stuck = False
+        return self.stuck
 
 
 def snapshot_fields(s):
@@ -207,9 +274,11 @@ def snapshot_fields(s):
 
     cpu, mem = s["cpu"], s["mem"]
     gpu = s["gpu"][0] if s["gpu"] else {}
+    mask = gpu.get("throttle_mask")             # NVML clock event reasons; older Sparklines lack it
     return dict(cpu=pct(cpu["util"]), gpu=None if gpu.get("util") is None else pct(gpu["util"]),
                 mem_used_mb=round(mem["used"] / 1e6), mem_total_mb=round(mem["total"] / 1e6),
                 temp_c=num(gpu.get("temp_c")), power_dw=num(gpu.get("power_w"), 10),
+                gpu_mhz=num(gpu.get("sm_mhz")), gpu_events=mask if isinstance(mask, int) else None,
                 cores=[pct(c) for c in cpu["per_core"]][:MAX_CORES])
 
 
@@ -266,6 +335,12 @@ def fmt(v):
     return "-" if v is None else str(v)
 
 
+def wire_line(line, proto):
+    """The sample for a reader of protocol `proto`: v1 is the v2 line without its last two
+    fields (gpu_mhz gpu_stuck), the form a display from before v2 accepts."""
+    return line if proto >= 2 else " ".join(line.split()[:V1_TOKENS])
+
+
 def short_hostname():
     """This host's short name for the display title, or "-" if it isn't wire-safe."""
     name = socket.gethostname().split(".")[0]
@@ -280,6 +355,7 @@ class Sampler:
 
     def __init__(self, gpu, sparkline=None):
         self.gpu, self.sparkline, self.host = gpu, sparkline, short_hostname()
+        self.clock = ClockWatch()
         self.snap = (None, 0.0, {})          # (line, monotonic time of it, /healthz fields)
         self.display = {"state": "searching"}    # the USB link, kept by serial_loop
         self._prev = read_cpu_times()
@@ -295,13 +371,19 @@ class Sampler:
         if got:
             cpu, gpu, memu, memt = got["cpu"], got["gpu"], got["mem_used_mb"], got["mem_total_mb"]
             temp, pow_dw, cores = got["temp_c"], got["power_dw"], got["cores"]
+            mhz, events = got["gpu_mhz"], got["gpu_events"]
         else:
             self.gpu.ensure_started()
-            gpu, temp, pow_dw = self.gpu.latest()
+            gpu, temp, pow_dw, mhz, events = self.gpu.latest()
+        if mhz is not None and not 0 <= mhz <= MHZ_MAX:
+            mhz = None                          # out of the firmware's range: it would drop the line
+        stuck = self.clock.update(gpu, mhz, events)
         line = (f"stat {cpu} {fmt(gpu)} {memu} {memt} {fmt(temp)} {fmt(pow_dw)} "
-                f"{','.join(map(str, cores)) or '-'} {self.host}")
+                f"{','.join(map(str, cores)) or '-'} {self.host} "
+                f"{fmt(mhz)} {fmt(None if stuck is None else int(stuck))}")
         sample = dict(host=self.host, cpu=cpu, gpu=gpu, mem_used_mb=memu, mem_total_mb=memt,
                       temp_c=temp, power_w=None if pow_dw is None else pow_dw / 10,
+                      gpu_mhz=mhz, gpu_clock_events=events, gpu_clock_stuck=stuck,
                       cores=cores, source="sparkline" if got else "own",
                       gpu_source=self.gpu.state, gpu_error=self.gpu.error)
         if self.sparkline:
@@ -309,7 +391,8 @@ class Sampler:
         self.snap = (line, time.monotonic(), sample)
 
     def latest(self):
-        """(line, at, sample); `at` is the monotonic time of that line."""
+        """(line, at, sample); `at` is the monotonic time of that line, a protocol v2 line
+        (wire_line() makes the v1 form)."""
         return self.snap
 
 
@@ -332,12 +415,15 @@ def make_handler(sampler):
         def do_GET(self):
             line, at, sample = sampler.latest()
             age = time.monotonic() - at
-            path = self.path.split("?", 1)[0]
+            path, _, query = self.path.partition("?")
             if path == "/stat":
+                # /stat is v1 for anything from before v2; a v2 display asks for /stat?v=2
+                asked = urllib.parse.parse_qs(query).get("v", ["1"])[-1]
+                proto = min(int(asked), PROTO) if asked.isdigit() else 1
                 if line is None or age > STALE_S:
                     self._send(503, "stale\n")
                 else:
-                    self._send(200, line + "\n")
+                    self._send(200, wire_line(line, proto) + "\n")
             elif path == "/healthz":
                 body = dict(version=__version__, age_s=round(age, 2), display=sampler.display, **sample)
                 self._send(200, json.dumps(body) + "\n", "application/json")
@@ -357,8 +443,13 @@ def candidate_ports():
                   if p.vid == USB_VID and p.pid == USB_PID)
 
 
+HANDSHAKE_LINE = re.compile(re.escape(HANDSHAKE) + rb"[^\r\n]*[\r\n]")
+PROTO_TOKEN = re.compile(rb" proto=(\d+)")
+
+
 def handshake(ser, timeout=HANDSHAKE_S, every=1.0):
-    """True if the device on `ser` is a SparkESP32 (answers status with fw=sparkesp32).
+    """The protocol the device on `ser` reads if it's a SparkESP32 (answers status with a
+    fw=sparkesp32 line): 1, or the line's proto=N (capped at PROTO). 0 if it isn't one.
 
     Asks again every `every` seconds: the port appears the moment the board is
     plugged in, before its console exists, and the console's terminal probe
@@ -371,9 +462,11 @@ def handshake(ser, timeout=HANDSHAKE_S, every=1.0):
             ser.write(b"\nstatus\n")
             ask_at = time.monotonic() + every
         buf = (buf + ser.read(256))[-4096:]
-        if HANDSHAKE in buf:
-            return True
-    return False
+        m = HANDSHAKE_LINE.search(buf)              # the whole line, to see its proto=
+        if m:
+            p = PROTO_TOKEN.search(m.group())
+            return min(int(p.group(1)), PROTO) if p else 1
+    return 0
 
 
 def serial_loop(sampler, explicit_port, stop):
@@ -382,11 +475,12 @@ def serial_loop(sampler, explicit_port, stop):
     The link's state goes to /healthz as sampler.display = {"state": ..., ...}:
       searching    no usable port ("error" says why if opening one failed)
       handshaking  asking `status` on "port", for up to HANDSHAKE_S
-      streaming    pushing stat lines to "port" ("answered_in_s": handshake time)
+      streaming    pushing stat lines to "port" ("answered_in_s": handshake time,
+                   "proto": the protocol its firmware reads)
       rejected     "port" didn't answer as a SparkESP32: skipped until it's
                    replugged or REJECT_S passes ("retry_in_s")
     """
-    ser, last_at, rejected = None, 0.0, {}
+    ser, last_at, rejected, proto = None, 0.0, {}, 1
     while not stop.is_set():
         try:
             if ser is None:
@@ -408,18 +502,20 @@ def serial_loop(sampler, explicit_port, stop):
                 sampler.display = {"state": "handshaking", "port": port}
                 ser = serial.Serial(port, 115200, timeout=0.2, write_timeout=1)
                 t0 = time.monotonic()
-                if not handshake(ser, HANDSHAKE_S):
+                proto = handshake(ser, HANDSHAKE_S)
+                if not proto:
                     log.warning("%s is an Espressif USB device but not a SparkESP32; ignoring it "
                                 "for %d minutes or until it's replugged", port, REJECT_S // 60)
                     ser.close()
                     ser, rejected[port] = None, time.monotonic() + REJECT_S
                     continue
                 took = round(time.monotonic() - t0, 1)
-                log.info("display connected on %s (answered in %.1fs)", port, took)
-                sampler.display = {"state": "streaming", "port": port, "answered_in_s": took}
+                log.info("display connected on %s (answered in %.1fs, protocol v%d)", port, took, proto)
+                sampler.display = {"state": "streaming", "port": port, "answered_in_s": took,
+                                   "proto": proto}
             line, at, _ = sampler.latest()
             if line and at != last_at:
-                ser.write((line + "\n").encode())
+                ser.write((wire_line(line, proto) + "\n").encode())
                 last_at = at
             if ser.in_waiting:              # drain console echo/replies so the
                 ser.read(ser.in_waiting)    # display's TX never backs up

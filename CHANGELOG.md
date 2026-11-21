@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- The GPU ring shows the GPU clock, and catches the GB10's stuck-clock state: under load
+  the GPU runs at 500–850 MHz instead of ~2,000–2,400 MHz, reports no throttle reason,
+  and stays that way until the Spark's power is fully drained (a reboot doesn't clear it).
+  When the GPU has run under load (80 %+) below 1000 MHz with no clock event reason for
+  10 seconds, the GPU ring turns amber and the line under ONLINE reads **CLOCK STUCK**
+  (on the black-and-white RLCD, that line and the GPU ring's title are inverted instead);
+  5 seconds under load at 1400 MHz or more clears it. Nothing moves, and no text comes
+  within 3 px of a ring on any board: on the 2.8" TFT's small rings, the lines under the
+  percentages use a 12 px font. The
+  thresholds are the community detector's from NVIDIA's forums. The agent logs a warning
+  when it happens, and `/healthz` reports `gpu_mhz`, `gpu_clock_events` and
+  `gpu_clock_stuck`. The clock comes from `nvidia-smi`, or from Sparkline's snapshot.
+- Protocol v2: two fields at the end of the `stat` line, `gpu_mhz` and `gpu_stuck`. Old
+  and new halves keep working together: the firmware still takes v1 lines, and the agent
+  sends v2 only to a board that asks for it (`proto=2` in its `status` handshake over USB,
+  `GET /stat?v=2` over Wi-Fi). Plain `/stat` is still v1.
+
+### Fixed
+
+- A long title, such as a hyphenated hostname (`dgx-spark-lab-bench-07`) or a saved name
+  with spaces, no longer wraps onto a second line and into the rings. It stays on one
+  line and ends in "…", as intended.
+
 ## 1.1.0 — 2026-11-21
 
 ### Added

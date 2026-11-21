@@ -1,7 +1,8 @@
 // SparkESP32 UI: DGX Spark vitals on the board's screen.
-// Three ring gauges (CPU / GPU / unified memory), a per-core heatmap,
+// Three ring gauges (CPU / GPU with its clock / unified memory), a per-core heatmap,
 // temperature + power tiles, and a liveness state that doubles as the
-// Spark's missing power light. Every lv_* call here runs under display_lock().
+// Spark's missing power light. When the agent reports the GB10's stuck-clock state,
+// the GPU ring says so. Every lv_* call here runs under display_lock().
 //
 // The board says how big the canvas is (BOARD_UI_W/H) and whether it's black and
 // white (BOARD_DISPLAY_MONO); this file picks the matching layout and theme. A
@@ -29,6 +30,8 @@ typedef struct {
     int ring_val_dy, ring_sub_dy;
     int ring_title_dy;                      // title's top, from the height of the arc's two ends
     const lv_font_t *ring_val_font;         // the big % in each ring
+    const lv_font_t *ring_sub_font;         // the detail under it: "2405 MHz", "99/131G"
+    const char *gpu_mhz_fmt;                // the GPU clock's format in that detail line
     int cores_y, cells_y, cells_h, cells_gap;   // the heatmap row
     int tile_x[2], tile_y, tile_w, tile_h;  // temperature and power
     int tile_radius, tile_pad, tile_label_y, tile_value_y;
@@ -41,6 +44,7 @@ static const layout_t L = {
     .status_y = 22, .reason_y = 46, .dot = 14,
     .ring_cy = 150, .ring_r = 58, .ring_w = 10, .ring_cx = {92, 240, 388},
     .ring_val_dy = -6, .ring_sub_dy = 16, .ring_title_dy = 23, .ring_val_font = &lv_font_montserrat_28,
+    .ring_sub_font = &lv_font_montserrat_14, .gpu_mhz_fmt = "%d MHz",
     .cores_y = 250, .cells_y = 276, .cells_h = 30, .cells_gap = 3,
     .tile_x = {16, 248}, .tile_y = 322, .tile_w = 216, .tile_h = 142,
     .tile_radius = 14, .tile_pad = 16, .tile_label_y = 14, .tile_value_y = -12,
@@ -52,6 +56,7 @@ static const layout_t L = {
     .status_y = 12, .reason_y = 34, .dot = 12,
     .ring_cy = 116, .ring_r = 52, .ring_w = 7, .ring_cx = {72, 200, 328},
     .ring_val_dy = -5, .ring_sub_dy = 14, .ring_title_dy = -7, .ring_val_font = &lv_font_montserrat_28,
+    .ring_sub_font = &lv_font_montserrat_14, .gpu_mhz_fmt = "%d MHz",
     .cores_y = 182, .cells_y = 200, .cells_h = 22, .cells_gap = 2,
     .tile_x = {14, 206}, .tile_y = 230, .tile_w = 180, .tile_h = 62,
     .tile_radius = 8, .tile_pad = 10, .tile_label_y = 5, .tile_value_y = -4,
@@ -62,7 +67,8 @@ static const layout_t L = {
     .margin = 10, .title_y = 8, .title_w = 170, .title_font = &lv_font_montserrat_24,
     .status_y = 8, .reason_y = 28, .dot = 10,
     .ring_cy = 92, .ring_r = 42, .ring_w = 6, .ring_cx = {56, 160, 264},
-    .ring_val_dy = -5, .ring_sub_dy = 14, .ring_title_dy = -4, .ring_val_font = &lv_font_montserrat_24,
+    .ring_val_dy = -5, .ring_sub_dy = 12, .ring_title_dy = -4, .ring_val_font = &lv_font_montserrat_24,
+    .ring_sub_font = &lv_font_montserrat_12, .gpu_mhz_fmt = "%dMHz",   // a 4-digit clock fits this small ring
     .cores_y = 152, .cells_y = 168, .cells_h = 14, .cells_gap = 1,
     .tile_x = {10, 164}, .tile_y = 186, .tile_w = 146, .tile_h = 52,
     .tile_radius = 8, .tile_pad = 8, .tile_label_y = 3, .tile_value_y = -2,
@@ -99,7 +105,8 @@ static const layout_t L = {
 typedef struct {
     lv_obj_t *arc;
     lv_obj_t *val;    // big % in the center
-    lv_obj_t *sub;    // small detail under the value ("99/131G")
+    lv_obj_t *sub;    // small detail under the value ("99/131G", "2405 MHz")
+    lv_obj_t *title;  // under the ring ("GPU")
 } ring_t;
 
 static lv_obj_t *s_scr, *s_name;
@@ -154,13 +161,44 @@ static void make_ring(ring_t *rg, int cx, const char *title)
     // children of the arc, aligned once: LVGL re-centres them when the text changes
     rg->val = mklabel(arc, L.ring_val_font, C_WHITE, "--");
     lv_obj_align(rg->val, LV_ALIGN_CENTER, 0, L.ring_val_dy);
-    rg->sub = mklabel(arc, &lv_font_montserrat_14, C_DIM, "");
+    rg->sub = mklabel(arc, L.ring_sub_font, C_DIM, "");
     lv_obj_align(rg->sub, LV_ALIGN_CENTER, 0, L.ring_sub_dy);
 
     // In the gap at the bottom of the arc: its two ends sit r*sin(45) below the
     // center. TOP_MID centers on the screen; offset by (cx - middle) for this ring.
     lv_obj_t *t = mklabel(s_scr, &lv_font_montserrat_16, C_DIM, title);
     lv_obj_align(t, LV_ALIGN_TOP_MID, cx - BOARD_UI_W / 2, cy + r * 707 / 1000 + L.ring_title_dy);
+    rg->title = t;
+}
+
+#if BOARD_DISPLAY_MONO
+// White on black instead of black on white: the mono theme's way of saying "look here".
+static void set_inverted(lv_obj_t *label, bool on, lv_color_t normal)
+{
+    lv_obj_set_style_bg_color(label, C_TRACK, 0);
+    lv_obj_set_style_bg_opa(label, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_hor(label, on ? 3 : 0, 0);
+    lv_obj_set_style_text_color(label, on ? C_BG : normal, 0);
+}
+#endif
+
+// The GB10 stuck-clock state (the agent's verdict, docs/troubleshooting.md). The header's
+// second line says so; the GPU ring's arc, clock and title turn amber, or on a
+// black-and-white screen the warning and the GPU title are inverted. Nothing moves, so
+// nothing can run into a ring.
+static void set_gpu_warning(bool on)
+{
+    static int shown = -1;                         // skip the restyle when nothing changed
+    if (shown == on) return;
+    shown = on;
+#if BOARD_DISPLAY_MONO
+    set_inverted(s_gpu.title, on, C_DIM);
+    set_inverted(s_srctext, on, C_DIM);
+#else
+    lv_obj_set_style_text_color(s_gpu.title, on ? C_AMBER : C_DIM, 0);
+    lv_obj_set_style_text_color(s_gpu.sub, on ? C_AMBER : C_DIM, 0);
+    lv_obj_set_style_text_color(s_srctext, on ? C_AMBER : C_DIM, 0);
+#endif
 }
 
 // a bottom readout tile: label + big value
@@ -213,6 +251,9 @@ void ui_init(const char *name)
     s_name = mklabel(s_scr, L.title_font, C_WHITE, "");
     lv_label_set_long_mode(s_name, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_width(s_name, L.title_w);
+    // one line tall: without a height, DOTS wraps a long name ("dgx-spark-lab-bench-07",
+    // "Lab Spark Upstairs Bench") onto more lines, down into the rings, instead of cutting it
+    lv_obj_set_height(s_name, lv_font_get_line_height(L.title_font));
     lv_obj_set_pos(s_name, L.margin, L.title_y);
     ui_set_name(name);
 
@@ -326,12 +367,25 @@ void ui_update(void)
     lv_obj_set_style_bg_color(s_dot, col, 0);
 #endif
     lv_obj_align_to(s_dot, s_livetext, LV_ALIGN_OUT_LEFT_MID, -10, 0);   // after the text's new width
-    lv_label_set_text(s_srctext, st.reason);
+    bool stuck = fresh && g_spark.gpu_stuck == 1;  // stale data says nothing about now
+    lv_label_set_text(s_srctext, stuck ? "CLOCK STUCK" : st.reason);
+    set_gpu_warning(stuck);
 
     // fields are SPARK_UNKNOWN until the first sample, so no per-field `valid` checks
     set_ring(&s_cpu, g_spark.cpu, fresh);
     set_ring(&s_gpu, g_spark.gpu, fresh);
     set_ring(&s_mem, spark_mem_pct(), fresh);
+
+    // the GPU's clock under its %; nothing from an agent that doesn't send it (protocol v1)
+    if (g_spark.gpu_mhz != SPARK_UNKNOWN) {
+        snprintf(buf, sizeof(buf), L.gpu_mhz_fmt, (int)g_spark.gpu_mhz);
+        lv_label_set_text(s_gpu.sub, buf);
+    } else {
+        lv_label_set_text(s_gpu.sub, "");
+    }
+#if !BOARD_DISPLAY_MONO
+    if (stuck) lv_obj_set_style_arc_color(s_gpu.arc, C_AMBER, LV_PART_INDICATOR);
+#endif
     if (spark_mem_pct() != SPARK_UNKNOWN) {
         // decimal GB, rounded — matches NVIDIA's dashboard ("99 GB of 131 GB")
         snprintf(buf, sizeof(buf), "%ld/%ldG", (long)((g_spark.mem_used_mb + 500LL) / 1000),

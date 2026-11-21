@@ -10,5 +10,7 @@ CONFIG_SPIRAM_SPEED_80M=y
 # console on the native USB-Serial/JTAG port (the agent's USB transport)
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
-# the 320x240 layout's title and ring values (firmware/main/ui.c)
+# the 320x240 layout's title and ring values, and the small line under each value
+# (firmware/main/ui.c)
 CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_12=y

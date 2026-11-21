@@ -1,11 +1,15 @@
-# Wire protocol (v1)
+# Wire protocol (v2)
 
 One sample is one line of ASCII text. The same line travels both ways to the display:
 written to its USB serial console, or returned as the body of `GET /stat`.
 
 ```
-stat <cpu> <gpu> <mem_used_mb> <mem_total_mb> <temp_c> <power_dw> <cores> <host>
+stat <cpu> <gpu> <mem_used_mb> <mem_total_mb> <temp_c> <power_dw> <cores> <host> <gpu_mhz> <gpu_stuck>
 ```
+
+A **v1** line is the first 9 tokens, without `gpu_mhz` and `gpu_stuck`. Agents and
+firmware from before 1.2 speak only v1; see [Versions](#versions) for how each side
+picks the form the other understands.
 
 | Field | Unit | Range | Source on the Spark |
 |---|---|---|---|
@@ -17,6 +21,8 @@ stat <cpu> <gpu> <mem_used_mb> <mem_total_mb> <temp_c> <power_dw> <cores> <host>
 | `power_dw` | deciwatts | 0–100000 | `nvidia-smi --query-gpu=power.draw` × 10 (the dashboard's "Device Power") |
 | `cores` | % each | 0–100 | `/proc/stat` per-core, comma-separated, no spaces: `3,0,12,…` |
 | `host` | text | 1–63 chars of `A–Z a–z 0–9 - _ .` | the short hostname (`hostname -s`); the display's title unless a name is saved on the board |
+| `gpu_mhz` | MHz | 0–10000 | `nvidia-smi --query-gpu=clocks.sm` (v2) |
+| `gpu_stuck` | flag | 0 or 1 | the agent's verdict on the GB10 stuck-clock state (v2): `1` stuck, `0` seen healthy under load, `-` not enough load yet to tell. See below. |
 
 - **Unknown is `-`.** Any field may be `-` when the host can't measure it (no
   `nvidia-smi`, a GB10 field that reports `[N/A]`, a stale reading). The display shows
@@ -29,20 +35,58 @@ stat <cpu> <gpu> <mem_used_mb> <mem_total_mb> <temp_c> <power_dw> <cores> <host>
 Example from a DGX Spark under GPU load:
 
 ```
-stat 6 91 46328 130661 60 410 1,1,1,2,0,0,1,0,1,1,0,0,1,1,1,1,99,1,0,0 spark-1a2b
+stat 6 91 46328 130661 60 410 1,1,1,2,0,0,1,0,1,1,0,0,1,1,1,1,99,1,0,0 spark-1a2b 2405 0
 ```
+
+### The stuck-clock verdict
+
+Some GB10 machines (DGX Spark and its OEM versions) get into a state where the GPU runs at
+500–850 MHz under full load instead of ~2,000–2,400 MHz, draws ~15–20 W instead of ~90 W,
+and reports no clock event reason. It survives a reboot; a full power drain clears it
+(NVIDIA forum threads [386060](https://forums.developer.nvidia.com/t/386060),
+[387029](https://forums.developer.nvidia.com/t/387029) and
+[376039](https://forums.developer.nvidia.com/t/376039)).
+
+The agent decides `gpu_stuck` from one reading a second of GPU utilization, SM clock and
+`clocks_event_reasons.active`, with the thresholds of the community's detector
+([blackbox](https://github.com/lcasarin-maker/blackbox)). Only readings at 80 %
+utilization or more count, because GB10 idle clocks float and say nothing:
+
+- a reading looks **stuck** below 1000 MHz when no event reason other than idle is active
+  (a thermal or power slowdown, a power cap or an application clock limit explains a low
+  clock); 10 in a row make `gpu_stuck` `1`;
+- a reading looks **healthy** at 1400 MHz or more; 5 in a row make it `0`;
+- anything in between restarts both counts; readings without load change nothing, so the
+  verdict holds through idle stretches, and a bursty workload adds up.
+
+The verdict starts as `-` when the agent starts, which a power drain implies.
 
 ## Validation
 
 The firmware parser (`firmware/main/spark_data.c`, tested by `tests/test_parser.c`) is
 strict and all-or-nothing:
 
-- exactly 9 space-separated tokens, the first being `stat`;
+- exactly 9 (v1) or 11 (v2) space-separated tokens, the first being `stat`;
 - every number is a complete base-10 integer within its range (`5x`, `0x10`, `1e3` are rejected);
 - `cores` has no empty entries (`5,,5`, `,5`, `5,` are rejected);
 - if any field fails, the previous sample is kept untouched.
 
 - `host` contains only hostname characters.
+
+A v1 line leaves the board's `gpu_mhz` and `gpu_stuck` unknown: the GPU ring then shows no
+clock, as before v2.
+
+## Versions
+
+Boards and agents are updated separately (a board on Wi-Fi somewhere else keeps its
+firmware when the Spark's agent is updated), so each side sends the newer form only to a
+reader that asks for it:
+
+- **USB.** The board's handshake line ends in `proto=2`. The agent sends v2 lines to a
+  board that says so, and v1 lines to one that doesn't (firmware before 1.2).
+- **HTTP.** `GET /stat` answers v1; `GET /stat?v=2` answers v2. Firmware from 1.2 on
+  appends `?v=2` (or `&v=2`) to its configured URL. Every agent release ignores a query
+  it doesn't know and answers v1, which the new parser still takes.
 
 Per-core values share one token because ESP-IDF's console splits a line into at most 31
 arguments, and a token per core would run out on bigger machines.
@@ -61,11 +105,11 @@ Before writing anything, a host must confirm it's talking to SparkESP32 firmware
 
 ```
 STATUS-BEGIN
-fw=sparkesp32 version=1.0.0 idf=v5.5.6 board=waveshare-esp32c6-amoled-2.16
+fw=sparkesp32 version=1.2.0 idf=v5.5.6 board=waveshare-esp32c6-amoled-2.16 proto=2
 name='Lab Spark' rot=cw
 heap_free=81160 min=72272
 stack_free repl=6344 net=7428 tick=4852
-valid=1 age_ms=412 src=usb host=spark-1a2b cpu=6 gpu=91 mem=46328/130661MB temp=60 power_dw=410 cores=20
+valid=1 age_ms=412 src=usb host=spark-1a2b cpu=6 gpu=91 mem=46328/130661MB temp=60 power_dw=410 cores=20 gpu_mhz=2405 gpu_stuck=0
 screen=online reason='via USB'
 wifi configured=1 connected=1 url=1
 STATUS-END
@@ -87,8 +131,9 @@ A sample over USB counts as fresh for 3 s. While it's fresh, the board skips its
 **Keep every console line under 256 bytes.** ESP-IDF's console line editor (linenoise,
 in the "dumb terminal" mode a program talking to it gets) reads into a 256-byte buffer.
 A line that fills it isn't terminated, and the rest of it is read as a second
-command. That's an upstream limitation. The agent stays well clear by sending at most 32
-per-core values (all the heatmap shows), which bounds a `stat` line at about 240 bytes.
+command. That's an upstream limitation. The agent stays under it by sending at most 32
+per-core values (all the heatmap shows), which bounds a v2 `stat` line at 245 bytes
+(`tests/test_agent.py` checks the worst case).
 
 ## HTTP transport
 
@@ -96,7 +141,8 @@ The agent serves, on port 8787 by default:
 
 | Request | Response |
 |---|---|
-| `GET /stat` | `200`, `text/plain`, the line + `\n`, with `Content-Length`. `503 stale` if the sampler hasn't produced a line in 5 s. |
+| `GET /stat` | `200`, `text/plain`, the v1 line + `\n`, with `Content-Length`. `503 stale` if the sampler hasn't produced a line in 5 s. |
+| `GET /stat?v=2` | the same, with the v2 line |
 | `GET /healthz` | `200`, JSON: version, sample age, display connection, each value broken out, and where the readings come from (`source`: `own` or `sparkline`) |
 | anything else | `404` |
 

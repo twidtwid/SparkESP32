@@ -252,7 +252,9 @@ static int cmd_status(int argc, char **argv)
     char name[UI_TITLE_MAX + 1];
     settings_get("name", name, sizeof(name), "");
     printf("STATUS-BEGIN\n");
-    printf("fw=sparkesp32 version=%s idf=%s board=%s\n", app->version, app->idf_ver, BOARD_ID);  // handshake
+    // the handshake: proto= tells the agent this board reads protocol v2 lines
+    printf("fw=sparkesp32 version=%s idf=%s board=%s proto=%d\n", app->version, app->idf_ver, BOARD_ID,
+           SPARK_PROTO);
     printf("name='%s' rot=%s\n", name, display_rot_name(display_get_rotation()));
     printf("heap_free=%u min=%u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT));
@@ -263,11 +265,12 @@ static int cmd_status(int argc, char **argv)
         uint32_t age = spark_age_ms();
         status_t st = ui_status();
         display_unlock();
-        char b[6][16];
+        char b[8][16];
         printf("valid=%d age_ms=%ld src=%s host=%s cpu=%s gpu=%s mem=%s/%sMB temp=%s power_dw=%s "
-               "cores=%d\n", s.valid, s.valid ? (long)age : -1L, spark_src_name(s.source),
-               s.host[0] ? s.host : "-", fv(b[0], s.cpu), fv(b[1], s.gpu), fv(b[2], s.mem_used_mb),
-               fv(b[3], s.mem_total_mb), fv(b[4], s.temp_c), fv(b[5], s.power_dw), s.ncores);
+               "cores=%d gpu_mhz=%s gpu_stuck=%s\n", s.valid, s.valid ? (long)age : -1L,
+               spark_src_name(s.source), s.host[0] ? s.host : "-", fv(b[0], s.cpu), fv(b[1], s.gpu),
+               fv(b[2], s.mem_used_mb), fv(b[3], s.mem_total_mb), fv(b[4], s.temp_c),
+               fv(b[5], s.power_dw), s.ncores, fv(b[6], s.gpu_mhz), fv(b[7], s.gpu_stuck));
         printf("screen=%s reason='%s'\n", screen_name(st.screen), st.reason);
     }
     printf("wifi configured=%d connected=%d url=%d\n", net_wifi_configured(),
@@ -283,7 +286,7 @@ void console_start(void)
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t rc = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     rc.prompt = "spark>";
-    rc.max_cmdline_length = 256;     // a 32-core stat line with a 63-char host is ~200 chars
+    rc.max_cmdline_length = 256;     // a 32-core v2 stat line with a 63-char host is ~210 chars
     rc.task_stack_size = 8192;       // shot/rot render LVGL on this task
 
     const esp_console_cmd_t cmds[] = {
