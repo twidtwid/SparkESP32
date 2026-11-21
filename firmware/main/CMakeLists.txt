@@ -3,6 +3,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     PRIV_REQUIRES
         board
+        board_api
         console
         mbedtls
         esp_wifi

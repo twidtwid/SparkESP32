@@ -21,6 +21,10 @@ UNIT=/etc/systemd/system/sparkesp32.service
 RULES=/etc/udev/rules.d/99-sparkesp32.rules
 HTTP_PORT=8787
 
+boards() { (cd "$HERE/firmware/boards" 2>/dev/null && printf '%s ' */ | tr -d /); }
+board_target() { sed -n 's/^CONFIG_IDF_TARGET="\{0,1\}\([a-z0-9]*\)"\{0,1\}$/\1/p' \
+                     "$HERE/firmware/boards/$1/sdkconfig.defaults" 2>/dev/null; }
+
 usage() {
     cat <<EOF
 SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
@@ -37,7 +41,9 @@ SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
   --clear-wifi             make the display forget its Wi-Fi settings
   --no-wifi                don't ask about Wi-Fi
   --rotation none|ccw|cw   screen rotation (default cw: USB-C port on the right)
-  --firmware DIR           flash bootloader.bin, partition-table.bin, sparkesp32.bin from DIR
+  --board ID               which board is on USB (default: what its firmware says, or
+                           its chip); one of: $(boards)
+  --firmware DIR           flash a firmware bundle from DIR (the images + flash_args)
   --no-flash               never flash, even if the board needs it
   --reflash                flash even if the board already runs $VERSION
   --port DEV               the display's serial port (default: autodetect)
@@ -56,7 +62,7 @@ trap '[ "$BASH_SUBSHELL" -gt 0 ] || die "unexpected failure at line $LINENO: $BA
 ARGS=""; [ $# -eq 0 ] || printf -v ARGS ' %q' "$@"    # for the "run with sudo" hint
 
 NAME="" NAME_SET="" HOST="" SSIDS="" PW_ENV="" OPEN_WIFI="" CLEAR_WIFI="" NO_WIFI="" ROTATION=""
-FW_DIR="" NO_FLASH="" REFLASH="" PORT="" LAN_CIDR="" YES="" UNINSTALL=""
+FW_DIR="" NO_FLASH="" REFLASH="" PORT="" LAN_CIDR="" YES="" UNINSTALL="" BOARD=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --name) NAME="${2?--name needs a value (\"\" for the hostname)}"; NAME_SET=1; shift ;;
@@ -67,6 +73,7 @@ while [ $# -gt 0 ]; do
         --clear-wifi) CLEAR_WIFI=1 ;;
         --no-wifi) NO_WIFI=1 ;;
         --rotation) ROTATION="${2?--rotation needs none|ccw|cw}"; shift ;;
+        --board) BOARD="${2?--board needs a board id}"; shift ;;
         --firmware) FW_DIR="${2?--firmware needs a directory}"; shift ;;
         --no-flash) NO_FLASH=1 ;;
         --reflash) REFLASH=1 ;;
@@ -158,24 +165,42 @@ if [ -z "$PORT" ]; then
     PORT="${PORTS[0]:-}"
 fi
 
-firmware_dir() {     # echo a dir holding the three images for $VERSION, fetching if needed
-    local d
-    for d in "$FW_DIR" "$HERE/dist/sparkesp32-firmware-$VERSION"; do
-        [ -n "$d" ] && [ -f "$d/sparkesp32.bin" ] && { echo "$d"; return; }
+firmware_dir() {     # echo a dir holding $BOARD's bundle for $VERSION, fetching if needed
+    local d pkg="sparkesp32-$BOARD-firmware-$VERSION"
+    for d in "$FW_DIR" "$HERE/dist/$pkg"; do
+        [ -n "$d" ] && [ -f "$d/sparkesp32.bin" ] && [ -f "$d/flash_args" ] && { echo "$d"; return; }
     done
-    [ -n "$FW_DIR" ] && die "--firmware $FW_DIR: no sparkesp32.bin there"
-    local b="$HERE/firmware/build"
+    [ -n "$FW_DIR" ] && die "--firmware $FW_DIR: no sparkesp32.bin + flash_args there"
+    local b="$HERE/firmware/build/$BOARD"
     d="$TMPD/fw"
     mkdir -p "$d"
-    if [ -f "$b/sparkesp32.bin" ]; then          # a local build (developers)
+    if [ -f "$b/sparkesp32.bin" ]; then          # a local build (developers): same shape as a bundle
         cp "$b/bootloader/bootloader.bin" "$b/partition_table/partition-table.bin" "$b/sparkesp32.bin" "$d/"
+        sed 's|[^ ]*/||' "$b/flash_args" > "$d/flash_args"
         echo "$d"; return
     fi
-    local url="$REPO_URL/releases/download/v$VERSION/sparkesp32-firmware-$VERSION.tar.gz"
-    say "downloading firmware $VERSION" >&2
+    local url="$REPO_URL/releases/download/v$VERSION/$pkg.tar.gz"
+    say "downloading firmware $VERSION for $BOARD" >&2
     curl -fsSL "$url" | tar -xz -C "$d" --strip-components=1 || die "couldn't download $url"
     (cd "$d" && sha256sum --quiet -c SHA256SUMS) || die "firmware checksum mismatch"
     echo "$d"
+}
+
+pick_board() {       # which board is on $PORT: --board, what its firmware says, or its chip
+    if [ -z "$BOARD" ]; then
+        BOARD="$(sed -n 's/^fw=sparkesp32 .*board=\([^ ]*\).*/\1/p' <<<"$DEV_STATUS")"
+    fi
+    if [ -z "$BOARD" ]; then      # factory firmware, or SparkESP32 from before boards: ask the chip
+        local chip b found=()
+        chip="$("$PY" -m esptool -p "$PORT" chip_id 2>/dev/null | sed -n 's/^Chip is \(ESP32-[A-Z0-9]*\).*/\1/p' |
+                tr '[:upper:]' '[:lower:]' | tr -d -)" || chip=""
+        [ -n "$chip" ] || die "couldn't identify the board on $PORT; name it with --board ($(boards))"
+        for b in $(boards); do [ "$(board_target "$b")" = "$chip" ] && found+=("$b"); done
+        [ "${#found[@]}" -eq 1 ] ||
+            die "the board on $PORT is an $chip; pick its board with --board (one of: $(boards))"
+        BOARD="${found[0]}"
+    fi
+    [ -n "$(board_target "$BOARD")" ] || die "unknown board '$BOARD'; one of: $(boards)"
 }
 
 DEV_STATUS=""
@@ -192,18 +217,25 @@ else
     if [ -n "$NO_FLASH" ]; then
         [ -n "$BOARD_VER" ] || warn "the board isn't running SparkESP32 firmware and --no-flash was given"
     elif [ -n "$REFLASH" ] || [ "$BOARD_VER" != "$VERSION" ]; then
+        pick_board
         FW="$(firmware_dir)"
-        say "flashing firmware $VERSION (board had: ${BOARD_VER:-other firmware})"
-        # Split images, never a merged one: a merged image overwrites the NVS
-        # partition and the board would forget its Wi-Fi and name.
-        "$PY" -m esptool --chip esp32c6 -p "$PORT" -b 460800 --before default_reset --after hard_reset \
-            write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB \
-            0x0 "$FW/bootloader.bin" 0x8000 "$FW/partition-table.bin" 0x10000 "$FW/sparkesp32.bin" \
-            || die "flashing failed; hold BOOT while plugging in the board, then re-run"
+        say "flashing firmware $VERSION for $BOARD (board had: ${BOARD_VER:-other firmware})"
+        # Split images at the offsets in the bundle's flash_args, never a merged image:
+        # that overwrites the NVS partition and the board would forget its Wi-Fi and
+        # name. esptool reads the chip itself and refuses an image built for another.
+        if ! (cd "$FW" && "$PY" -m esptool -p "$PORT" -b 460800 --before default_reset --after hard_reset \
+                write_flash @flash_args); then
+            # a refused image leaves the chip in its bootloader: reset it back (best effort)
+            "$PY" -m esptool -p "$PORT" --after hard_reset chip_id >/dev/null 2>&1 || true
+            die "flashing failed: see esptool's message above (\"not an ESP32-... image\": wrong --board;
+       can't connect: hold BOOT while plugging the board in, then re-run)"
+        fi
         for _ in 1 2 3; do sleep 1; read_status; [ -n "$DEV_STATUS" ] && break; done   # each try waits 10 s
         [ -n "$DEV_STATUS" ] || die "the board didn't answer after flashing"
         [ "$(board_version)" = "$VERSION" ] ||
             warn "the board now runs '$(board_version)', not $VERSION: was $FW built from another version?"
+        grep -q "board=$BOARD\b" <<<"$DEV_STATUS" ||
+            warn "the board doesn't report board=$BOARD: was $FW built for another board?"
     else
         say "board already runs $VERSION"
     fi

@@ -61,7 +61,7 @@ Before writing anything, a host must confirm it's talking to SparkESP32 firmware
 
 ```
 STATUS-BEGIN
-fw=sparkesp32 version=0.1.0 idf=v5.5.6
+fw=sparkesp32 version=0.1.0 idf=v5.5.6 board=waveshare-esp32c6-amoled-2.16
 name='Lab Spark' rot=cw
 heap_free=81160 min=72272
 stack_free repl=6344 net=7428 tick=4852
@@ -70,6 +70,10 @@ screen=online reason='via USB'
 wifi configured=1 connected=1 url=1
 STATUS-END
 ```
+
+`board=` is the board's directory under `firmware/boards/`. The installer uses it to
+pick the firmware to flash. Firmware from before boards had no `board=`; treat that as
+the reference board.
 
 **Ask more than once.** The serial port appears the moment the board is plugged in or
 reset, about 2 s before its console is running, and the console's terminal probe (IDF's
@@ -110,7 +114,7 @@ there (`shot` answers `ERR lock` when the UI is busy).
 |---|---|---|
 | `stat …` | `OK stat` / `ERR stat <field>` | one sample |
 | `name "<text>"` | `OK name` | fixed header title, ≤24 printable ASCII, saved; `name ""` = use the feed's `host` |
-| `rot [none\|ccw\|cw]` | `OK rot [<current>]` | rotation; saved |
+| `rot [none\|ccw\|cw]` | `OK rot [<current>]` | rotation; saved. `ERR rot <r> not supported on this board` for a rotation the board's layout can't show |
 | `wifi [show]` | `NET-END` | config + link + poll counters (never the password) |
 | `wifi ssids "<a,b>"` | `OK wifi ssids` | ≤4 SSIDs, each 1–32 bytes, tried in order |
 | `wifi pass "<pw>"` | `OK wifi pass` | 8–63 chars, or `""` for an open network; dropped from console history |

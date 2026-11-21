@@ -23,10 +23,32 @@ jobs:
       - name: make check
         run: make check
 
+  boards:
+    name: List boards
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        # every firmware/boards/<id>/ with its chip, so a new board is built here automatically
+        run: |
+          list=$(for b in $(make -s boards); do
+            t=$(sed -n 's/^CONFIG_IDF_TARGET="\{0,1\}\([a-z0-9]*\)"\{0,1\}$/\1/p' "firmware/boards/$b/sdkconfig.defaults")
+            printf '{"board":"%s","target":"%s"}\n' "$b" "$t"
+          done | jq -s -c .)
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+          echo "$list"
+
   firmware:
-    name: Firmware (ESP-IDF v5.5.6, esp32c6)
+    name: Firmware (${{ matrix.board }})
+    needs: boards
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.boards.outputs.list) }}
     steps:
       - uses: actions/checkout@v7
       - name: Free runner disk
@@ -40,11 +62,11 @@ jobs:
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.6
-          target: esp32c6
-          command: make dist
+          target: ${{ matrix.target }}
+          command: make bundle BOARD=${{ matrix.board }}
       - name: Upload firmware bundle
         uses: actions/upload-artifact@v7
         with:
-          name: sparkesp32-firmware
+          name: sparkesp32-${{ matrix.board }}
           path: dist/
           if-no-files-found: error

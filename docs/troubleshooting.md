@@ -83,7 +83,7 @@ tries, then `no network` (reason 201/212), `wrong password` (15/202/204) or `can
 
 | reason | Meaning | Usually |
 |---|---|---|
-| 201 | no AP found | wrong name, or the network is 5/6 GHz only (the ESP32-C6 is **2.4 GHz only**) |
+| 201 | no AP found | wrong name, or the network is 5/6 GHz only (the ESP32-C6 and S3 are **2.4 GHz only**) |
 | 15, 204 | 4-way handshake timeout | wrong password |
 | 202 | authentication failed | wrong password, or WPA3-only network with incompatible settings |
 | 210, 211 | no AP with compatible security | the network needs something other than WPA2/WPA3-Personal (e.g. 802.1X), or it's WEP/open-only with odd settings |
@@ -116,13 +116,21 @@ CPU, memory and the core heatmap don't depend on `nvidia-smi`.
 ## The image is sideways
 
 `sudo ./install.sh --rotation none|ccw|cw`. The default `cw` is upright with the board's
-USB-C port on the right.
+USB-C port on the right. A board with a rectangular screen is laid out for one shape and
+takes only the two rotations that keep it: the S3 reflective LCD is landscape, `ccw` or
+`cw`, and answers `ERR rot none not supported on this board` to the third.
 
 ## Flashing fails
 
 - Hold the board's **BOOT** button while plugging it in (forces the ROM bootloader), then
   re-run `sudo ./install.sh --reflash`.
 - `several Espressif USB devices attached`: pick one with `--port /dev/ttyACMn`.
+- `couldn't identify the board` or `pick its board with --board`: the board isn't running
+  SparkESP32 yet and its chip matches more than one supported board, or none. Name it:
+  `sudo ./install.sh --board <id>` (`./install.sh --help` lists the ids).
+- esptool says the image `is not an ESP32-...` image: the firmware is for a different
+  board than the one plugged in. Check `--board`. The installer resets the board
+  afterwards, so it isn't left stuck in its bootloader.
 
 ## Starting over
 

@@ -29,19 +29,23 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
-      - name: Build firmware and release bundle
+      - name: Build every board's release bundle
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.5.6
+          # only the container's default IDF_TARGET: make dist sets each board's own chip
           target: esp32c6
           command: make dist
 
-      - name: Verify the bundle install.sh will download
+      - name: Verify every bundle install.sh can download
         run: |
           v="$(head -n1 VERSION)"
-          tar -tzf "dist/sparkesp32-firmware-$v.tar.gz"
-          mkdir -p /tmp/verify && tar -xzf "dist/sparkesp32-firmware-$v.tar.gz" -C /tmp/verify
-          (cd "/tmp/verify/sparkesp32-firmware-$v" && sha256sum -c SHA256SUMS)
+          (cd dist && sha256sum -c SHA256SUMS)
+          for b in $(make -s boards); do
+            pkg="sparkesp32-$b-firmware-$v"
+            mkdir -p "/tmp/verify/$b" && tar -xzf "dist/$pkg.tar.gz" -C "/tmp/verify/$b"
+            (cd "/tmp/verify/$b/$pkg" && sha256sum -c SHA256SUMS && test -s flash_args)
+          done
 
       - name: Publish GitHub release
         env:
@@ -51,6 +55,4 @@ jobs:
           flags=(--verify-tag --generate-notes --title "SparkESP32 $v")
           [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
-            "dist/sparkesp32-firmware-$v.tar.gz" \
-            "dist/sparkesp32-$v-merged.bin" \
-            dist/SHA256SUMS
+            dist/*.tar.gz dist/*-merged.bin dist/SHA256SUMS

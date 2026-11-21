@@ -8,10 +8,9 @@
 // and the result forwarded to the adapter's original flush.
 
 #include "display.h"
-#include "board.h"
+#include "board_lcd.h"
 
 #include <assert.h>
-#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "esp_lv_adapter.h"
@@ -24,17 +23,6 @@ static lv_display_t *s_disp;
 static lv_display_flush_cb_t s_panel_flush;
 static uint16_t *s_rot_buf;
 static display_rot_t s_rot;
-
-static const char *const ROT_NAMES[] = {"none", "ccw", "cw"};   // indexed by display_rot_t
-
-int display_rot_from_name(const char *name)
-{
-    for (int i = 0; i < 3; i++)
-        if (!strcmp(name, ROT_NAMES[i])) return i;
-    return -1;
-}
-
-const char *display_rot_name(display_rot_t rot) { return ROT_NAMES[rot]; }
 
 static void rotate_flush_cb(lv_display_t *d, const lv_area_t *area, uint8_t *px_map)
 {
@@ -124,6 +112,10 @@ esp_err_t display_start(display_rot_t rot)
 esp_err_t display_lock(int timeout_ms) { return esp_lv_adapter_lock(timeout_ms); }
 void display_unlock(void) { esp_lv_adapter_unlock(); }
 
-void display_set_rotation(display_rot_t rot) { s_rot = rot; }
+esp_err_t display_set_rotation(display_rot_t rot)   // square panel: all three work
+{
+    s_rot = rot;
+    return ESP_OK;
+}
 
 display_rot_t display_get_rotation(void) { return s_rot; }

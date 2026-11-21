@@ -44,8 +44,9 @@ void app_main(void)
     // ESP32-C6 erratum (espressif/esp-idf#17432): a power-on boot that races the
     // host enumerating the USB port can leave the USB-Serial/JTAG link dead, with
     // no bytes either way, until the chip is reset. A CPU reset after enumeration
-    // always brings it up and never breaks it, and esp_restart() on the C6 resets
-    // only the CPU, so the host keeps the port. Restart once per power-on (~0.5 s).
+    // always brings it up and never breaks it. esp_restart() resets only the CPU
+    // on the C6 and the S3 alike, so the host keeps the port: restart once per
+    // power-on (~0.5 s), on every board.
     if (esp_reset_reason() == ESP_RST_POWERON) {
         esp_restart();
     }

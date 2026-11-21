@@ -11,9 +11,9 @@ someone, or changing it. Humans: [README.md](README.md) is the friendlier versio
    you have no TTY, set up USB-only and tell the human the exact command to run themselves.
 2. **Run the installer on the Spark, with sudo, from the repo root.** It needs root for
    systemd/udev/ufw, and it runs the agent as the invoking (non-root) user.
-3. **Flash split images only** (bootloader 0x0, partition table 0x8000, app 0x10000).
-   The merged image overwrites the NVS partition and the board forgets its name and Wi-Fi.
-   The installer and `make flash` already do this right.
+3. **Flash split images only** (bootloader, partition table and app, at the offsets in
+   the bundle's `flash_args`). The merged image overwrites the NVS partition and the
+   board forgets its name and Wi-Fi. The installer and `make flash` already do this right.
 4. **Don't change settings the human didn't ask for.** The installer only fills in unset
    values unless given a flag. Keep it that way.
 
@@ -50,9 +50,10 @@ sudo --preserve-env=WIFI_PSK ./install.sh --yes --ssids "HomeNet" --wifi-passwor
 ```
 
 Useful flags: `--host <ip>` when mDNS (`<hostname>.local`) doesn't resolve on their LAN;
-`--port /dev/ttyACMn` if several Espressif boards are attached; `--no-flash` to leave
-the firmware alone; `--lan <cidr>` to override the subnet ufw allows. `./install.sh --help`
-lists everything.
+`--port /dev/ttyACMn` if several Espressif boards are attached; `--board <id>` if the
+installer can't tell which supported board it is (it asks the firmware, then the chip);
+`--no-flash` to leave the firmware alone; `--lan <cidr>` to override the subnet ufw
+allows. `./install.sh --help` lists everything.
 
 ### Definition of done
 
@@ -86,26 +87,37 @@ tools/
   sparklink.py             serial plumbing: find by USB ID, handshake, run-until-terminator
   provision.py             set name/host/Wi-Fi/rotation over USB (never prints the password)
   devctl.py                bench/QA: status, demo, CRC-checked screenshots, raw console
-firmware/                  ESP-IDF 5.5 project (target esp32c6)
+  check_boards.py          every firmware/boards/<id>/ has what a board needs (make check)
+firmware/                  ESP-IDF 5.5 project; the board picks the chip
   main/spark_data.c        the protocol parser both transports share
   main/net.c               Wi-Fi supervisor + 1 Hz HTTP poll
-  main/ui.c                LVGL screen
+  main/link.c, status.c    the Wi-Fi link and screen-state machines (pure C, host-tested)
+  main/ui.c                LVGL screen; one layout per board canvas size
   main/console_cmds.c      USB console commands (the agent's and the tools' interface)
-  components/board/        AXP2101 PMIC, QSPI AMOLED panel, LVGL rotation (our code)
+  components/board_api/    the board contract main/ builds against: board.h, display.h
   components/xpowerslib/   vendored XPowersLib (MIT), unmodified
-tests/                     host tests: agent + tools (Python), parser (C, stubbed esp_timer)
-docs/                      protocol.md, troubleshooting.md
+  boards/<id>/             one per board: board/ component, sdkconfig.defaults,
+                           partitions.csv, dependencies.lock, README.md
+    waveshare-esp32c6-amoled-2.16/   the reference board, and the default
+    waveshare-esp32s3-rlcd-4.2/      second board: ESP32-S3, 1-bit reflective LCD
+tests/                     host tests: agent + tools (Python); parser and state machines (C)
+docs/                      protocol.md, troubleshooting.md, adding-a-device.md
 ```
 
 ## Changing the code
 
 - `make check` must pass. It needs only python3 and a C compiler, and covers py_compile,
-  unit tests, the C parser tests, ruff (via `uvx` if not installed) and shellcheck.
-- Firmware: `. ~/esp/esp-idf/export.sh` (ESP-IDF **v5.5.x**), then `make build`. Treat
-  any new warning in `firmware/main` or `firmware/components/board` as an error.
+  unit tests, the C parser and state-machine tests, `tools/check_boards.py`, ruff (via
+  `uvx` if not installed) and shellcheck.
+- Firmware: `. ~/esp/esp-idf/export.sh` (ESP-IDF **v5.5.x**), then `make build` (the C6,
+  the default) or `make build BOARD=<id>`. Shared code (`firmware/main`) must build on
+  every board: run `make dist` before you call a change done. Treat any new warning in
+  `firmware/main` or `firmware/boards/` as an error.
+- Always build through `make`. It passes the board's chip and sdkconfig path to `idf.py`;
+  plain `idf.py build` guesses the chip and can build for the wrong one.
 - Hardware check after firmware changes: `make flash`, then
-  `python3 tools/devctl.py status` (first data line must be `fw=sparkesp32 version=...`),
-  then `python3 tools/devctl.py demoshot /tmp/s.png 70` and look at the PNG.
+  `python3 tools/devctl.py status` (first data line must be `fw=sparkesp32 version=...
+  board=<id>`), then `python3 tools/devctl.py demoshot /tmp/s.png 70` and look at the PNG.
 - **Protocol changes** touch four places at once: `firmware/main/spark_data.c`,
   `agent/sparkesp32_agent.py`, `tests/`, and `docs/protocol.md`. The console splits on
   spaces with a 32-token cap, so keep each sample to a few tokens.
@@ -115,9 +127,50 @@ docs/                      protocol.md, troubleshooting.md
 - Bump `VERSION` and `__version__` in the agent together (`make check` enforces it), and
   add a `CHANGELOG.md` entry.
 
+## Adding a new device
+
+The human guide is [docs/adding-a-device.md](docs/adding-a-device.md); read it first.
+This is the order to work in and what to prove at each step.
+
+1. **Confirm the board can work** before writing code: an ESP32-C3/C5/C6/S3 (Wi-Fi plus
+   native USB-Serial/JTAG), USB wired to the chip, `VID:PID=303A:1001` in
+   `python3 -m serial.tools.list_ports -v`, 8 MB+ flash. If any of these fail, stop and
+   tell the human why.
+2. **Back up the factory flash** (`esptool read_flash 0 <flash size> factory.bin`) to a
+   path outside the repo, and tell the human where it is.
+3. **Collect facts, not code.** Pins, panel controller, init sequence, power-enable
+   order, from the vendor's docs. Check the license of any vendor example before
+   reusing it; with no license, write the driver yourself and cite the source in the
+   board README and `THIRD_PARTY_NOTICES.md`.
+4. **Copy the closer existing board** to `firmware/boards/<vendor>-<chip>-<display>-<size>/`,
+   delete the copy's `dependencies.lock`, then edit `board_config.h`, `sdkconfig.defaults`,
+   `partitions.csv` (if flash < 8 MB), `board/CMakeLists.txt`, `board/idf_component.yml`, and add
+   the board to `firmware/boards/README.md`. `python3 tools/check_boards.py` must pass.
+5. **Panel first, LVGL second.** Get a solid fill on the whole panel from `board_init()`,
+   then write `display.c` against the contract in `firmware/components/board_api/`.
+   Render RGB565; convert in the flush callback.
+6. **A new canvas size gets a new `#elif` layout in `firmware/main/ui.c`**, not a change to
+   the existing ones. The C6's 480×480 layout must stay byte-for-byte the same.
+7. **Build every board** (`make dist`), zero new warnings. Flash yours with
+   `make flash BOARD=<id> PORT=...`.
+8. **Verify on hardware** with the table in the guide's "Verify" step. You can run the
+   handshake, demoshot, rotations, Wi-Fi and reflash checks yourself. Only the human can
+   check the physical screen (upright, not mirrored, not inverted) and do the cold
+   plug-ins. Ask for those in one batch, once, at the end.
+9. **Write the board README**: chip, display, pins, sources, quirks, and a "Verified"
+   section that says what was checked on the real board and what wasn't. Don't claim a
+   check nobody ran.
+10. **Open the pull request** following [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-device),
+    with the evidence it lists.
+
+Don't touch the reference board's files or make the new board the default. The C6
+AMOLED stays the recommended board in the README and in every screenshot.
+
 ## Releasing
 
-Tag `vX.Y.Z` matching `VERSION`. `.github/workflows/release.yml` builds the firmware and
-attaches `sparkesp32-firmware-X.Y.Z.tar.gz` (split images + `flash_args` + `SHA256SUMS`),
-the merged image, and checksums. `install.sh` downloads that tarball when the repo has no
-local build.
+Tag `vX.Y.Z` matching `VERSION`. `.github/workflows/release.yml` builds every board
+(`make dist`) and attaches, per board, `sparkesp32-<board>-firmware-X.Y.Z.tar.gz` (split
+images + `flash_args` + `SHA256SUMS`) and `sparkesp32-<board>-X.Y.Z-merged.bin`, plus one
+`SHA256SUMS` over all of them. `install.sh` picks the board from the handshake's `board=`
+(or the chip, or `--board`) and downloads that board's tarball when the repo has no local
+build.

@@ -12,17 +12,19 @@ applies to the firmware images published under Releases.
 
 ## Linked into the firmware
 
-Fetched at build time by the ESP-IDF component manager (pinned in
-`firmware/dependencies.lock`) and compiled into `sparkesp32.bin`:
+Fetched at build time by the ESP-IDF component manager (pinned per board in
+`firmware/boards/<id>/dependencies.lock`) and compiled into `sparkesp32.bin`:
 
 | Project | Version | License |
 |---|---|---|
 | [ESP-IDF](https://github.com/espressif/esp-idf) (Espressif) | 5.5.6 | Apache-2.0. Its bundled components (FreeRTOS, lwIP, mbedTLS, newlib, wpa_supplicant and others) carry their own permissive licenses, listed in [ESP-IDF's copyright notice](https://docs.espressif.com/projects/esp-idf/en/v5.5.6/esp32c6/COPYRIGHT.html) |
 | [LVGL](https://github.com/lvgl/lvgl) | 9.6.0 | MIT |
-| [esp_lvgl_adapter](https://components.espressif.com/components/espressif/esp_lvgl_adapter) (Espressif) | 0.7.9 | Apache-2.0 |
-| [esp_lcd_sh8601](https://components.espressif.com/components/espressif/esp_lcd_sh8601) (Espressif) | 2.0.1 | Apache-2.0 |
+| [esp_lvgl_adapter](https://components.espressif.com/components/espressif/esp_lvgl_adapter) (Espressif) | 0.7.9 | Apache-2.0. ESP32-C6 AMOLED only |
+| [esp_lcd_sh8601](https://components.espressif.com/components/espressif/esp_lcd_sh8601) (Espressif) | 2.0.1 | Apache-2.0. ESP32-C6 AMOLED only |
 
-The adapter also pulls in, as build-time dependencies, Espressif's `esp_lv_fs`,
+The ESP32-S3 reflective-LCD build uses only ESP-IDF and LVGL from this table.
+
+On the C6 build, the adapter also pulls in, as build-time dependencies, Espressif's `esp_lv_fs`,
 `esp_lv_decoder`, `esp_mmap_assets`, `button`, `knob`, `esp_lcd_touch`, `esp_new_jpeg`
 and their `freetype`, `libpng`, `zlib` and `qoi` ports. SparkESP32 calls none of them,
 and the linker drops them: none of their symbols are in `sparkesp32.elf`. They're listed
@@ -40,7 +42,11 @@ and zlib licenses, and the Espressif MIT License) are in each component's direct
 
 ## Hardware
 
-Pin assignments and panel initialization values for the Waveshare
-ESP32-C6-Touch-AMOLED-2.16 come from Waveshare's published
-[documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16) and schematic.
-The board-support code in `firmware/components/board/` is original to this project.
+Pin assignments and panel initialization values come from the board makers'
+published material. The board-support code in `firmware/boards/` is original to this
+project.
+
+| Board | Source of the hardware facts |
+|---|---|
+| Waveshare ESP32-C6-Touch-AMOLED-2.16 | Waveshare's [documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16) and schematic |
+| Waveshare ESP32-S3-RLCD-4.2 | Waveshare's [documentation](https://docs.waveshare.com/ESP32-S3-RLCD-4.2), and the [Zephyr project's devicetree](https://github.com/zephyrproject-rtos/zephyr/tree/main/boards/waveshare/esp32s3_rlcd_4_2) for the board (Apache-2.0) for the ST7306 register values. No code was copied |

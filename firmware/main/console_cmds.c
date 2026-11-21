@@ -10,6 +10,7 @@
 //   shot               CRC'd base64 framebuffer dump (tools/devctl.py reassembles)
 
 #include "console_cmds.h"
+#include "board.h"
 #include "display.h"
 #include "net.h"
 #include "settings.h"
@@ -47,19 +48,22 @@ static void tee_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
            (int)area->y2, (unsigned)nbytes, (unsigned long)crc);
     static unsigned char line[97];
     const unsigned char *src = px_map;
-    for (size_t left = nbytes; left > 0;) {
+    for (size_t left = nbytes, n = 0; left > 0; n++) {
         size_t chunk = left > 72 ? 72 : left, olen = 0;
         mbedtls_base64_encode(line, sizeof(line), &olen, src, chunk);
         fwrite(line, 1, olen, stdout);
         fputc('\n', stdout);
         src += chunk;
         left -= chunk;
+        // A whole-screen area is hundreds of KB of text: let the idle task in now
+        // and then, or the task watchdog fires mid-dump.
+        if ((n & 63) == 63) vTaskDelay(1);
     }
     s_orig_flush(disp, area, px_map);
 }
 
-// The dump is taken in logical (pre-rotation) orientation, before the
-// panel's byte swap — i.e. exactly what LVGL rendered.
+// The dump is taken in logical (pre-rotation) orientation, before the panel's
+// byte swap or 1-bit conversion: exactly what LVGL rendered.
 static int cmd_shot(int argc, char **argv)
 {
     if (display_lock(5000) != ESP_OK) { printf("ERR lock\n"); return 1; }
@@ -69,7 +73,8 @@ static int cmd_shot(int argc, char **argv)
     lv_display_t *disp = lv_display_get_default();
     s_orig_flush = disp->flush_cb;
     lv_display_set_flush_cb(disp, tee_flush_cb);
-    printf("SHOT-BEGIN 480 480 rgb565\n");
+    printf("SHOT-BEGIN %d %d rgb565\n", (int)lv_display_get_horizontal_resolution(disp),
+           (int)lv_display_get_vertical_resolution(disp));
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(disp);
     printf("SHOT-END\n");
@@ -128,8 +133,12 @@ static int cmd_rot(int argc, char **argv)
     int r = display_rot_from_name(argv[1]);
     if (r < 0) { printf("ERR usage: rot none|ccw|cw\n"); return 1; }
     if (display_lock(5000) != ESP_OK) { printf("ERR lock\n"); return 1; }
+    if (display_set_rotation((display_rot_t)r) != ESP_OK) {
+        display_unlock();
+        printf("ERR rot %s not supported on this board\n", argv[1]);
+        return 1;
+    }
     if (settings_set("rot", argv[1]) != ESP_OK) { display_unlock(); printf("ERR rot save\n"); return 1; }
-    display_set_rotation((display_rot_t)r);
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(lv_display_get_default());
     display_unlock();
@@ -191,7 +200,7 @@ static int cmd_status(int argc, char **argv)
     char name[UI_TITLE_MAX + 1];
     settings_get("name", name, sizeof(name), "");
     printf("STATUS-BEGIN\n");
-    printf("fw=sparkesp32 version=%s idf=%s\n", app->version, app->idf_ver);  // handshake line
+    printf("fw=sparkesp32 version=%s idf=%s board=%s\n", app->version, app->idf_ver, BOARD_ID);  // handshake
     printf("name='%s' rot=%s\n", name, display_rot_name(display_get_rotation()));
     printf("heap_free=%u min=%u\n", (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT));

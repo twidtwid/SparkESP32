@@ -1,6 +1,7 @@
 // Board bring-up: I2C bus -> AXP2101 rails -> QSPI AMOLED panel.
 
 #include "board.h"
+#include "board_lcd.h"
 #include "pmic.h"
 
 #include "driver/i2c_master.h"
