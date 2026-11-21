@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Fixed
+
+- `shot` no longer loses whole lines of a screenshot. On the C6 reference
+  board, 6 of 31 full-screen dumps came back with a strip that failed its CRC
+  check, and `devctl.py shot` had to retry. ESP-IDF's console throws away
+  output, and still reports success, while its USB connection monitor thinks the
+  host is gone. On the C6 that monitor is sometimes wrong for a few milliseconds
+  with the host attached and reading, and each time the dump lost every line it
+  wrote meanwhile (17 to 61 lines). The dump now writes straight to the
+  USB-Serial/JTAG driver, which waits for room and doesn't ask the monitor; if
+  the host stops reading, the dump ends in an `ERR` line. Measured after the fix:
+  148 of 148 dumps intact, including 4 that hit the monitor's false alarm. A
+  full-screen C6 screenshot also takes 1.0 s instead of 5.7 s.
+- `devctl.py` reports the board's own `ERR` when a dump stops partway, instead
+  of a CRC or coverage complaint.
+
 ## 1.0.0 — 2026-11-21
 
 First public release.

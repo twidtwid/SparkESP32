@@ -36,6 +36,11 @@ def parse_shot(raw):
         start = next(i for i, ln in enumerate(lines) if ln.startswith("SHOT-BEGIN"))
     except StopIteration:   # e.g. "ERR lock": report the firmware's own words
         raise LinkError(next((ln for ln in lines if ln.startswith("ERR")), "no SHOT-BEGIN")) from None
+    # the board gave up mid-dump (a write timed out): its words, not a CRC or coverage
+    # complaint. Base64 never holds a space, so no data line starts "ERR ".
+    err = next((ln.strip() for ln in lines[start:] if ln.startswith("ERR ")), None)
+    if err:
+        raise LinkError(err)
     w, h = map(int, lines[start].split()[1:3])
     fb, covered, i = bytearray(w * h * 2), 0, start + 1
     while i < len(lines) and not lines[i].startswith("SHOT-END"):

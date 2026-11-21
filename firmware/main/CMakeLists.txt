@@ -5,6 +5,7 @@ idf_component_register(
         board
         board_api
         console
+        esp_driver_usb_serial_jtag
         mbedtls
         esp_wifi
         esp_netif

@@ -18,12 +18,15 @@
 #include "ui.h"
 
 #include <ctype.h>
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/usb_serial_jtag.h"
 #include "esp_app_desc.h"
 #include "esp_console.h"
 #include "esp_crc.h"
@@ -36,7 +39,43 @@
 
 // ---------------------------------------------------------------- shot
 
+// The dump bypasses stdio and goes straight to the USB-Serial/JTAG driver.
+// ESP-IDF's console throws away every write() while its USB connection monitor
+// (usb_serial_jtag_is_connected(), which watches for the host's start-of-frame
+// packets on each FreeRTOS tick) says the host is gone, and still reports
+// success: vfs_console's write returns the full size. On the C6 that monitor
+// says so for a few milliseconds at a time with the host attached and reading,
+// and a full-screen dump through stdio (one write() per base64 line) lost
+// every line written meanwhile, with nothing to show for it but a bad CRC.
+// The driver call doesn't ask the monitor: it waits until the bytes are queued
+// or SHOT_WRITE_TIMEOUT_MS passes, so every line reaches the host or the dump
+// ends in ERR. Whole lines also travel in fewer, fuller USB packets than
+// stdio's byte-at-a-time path, which makes the dump about 5x faster.
+#define SHOT_WRITE_TIMEOUT_MS 1000
+
 static lv_display_flush_cb_t s_orig_flush;
+static bool s_shot_ok;      // false once a write timed out: the rest is skipped
+
+static void shot_write(const char *buf, size_t len)
+{
+    if (s_shot_ok && usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(SHOT_WRITE_TIMEOUT_MS)) != (int)len)
+        s_shot_ok = false;
+}
+
+// one "\r\n"-terminated line, as the console's own output ends its lines
+static void shot_line(const char *fmt, ...)
+{
+    char buf[80];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
+    va_end(ap);
+    if (n < 0) return;
+    if (n > (int)sizeof(buf) - 3) n = sizeof(buf) - 3;
+    buf[n++] = '\r';
+    buf[n++] = '\n';
+    shot_write(buf, n);
+}
 
 static void tee_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
@@ -44,15 +83,16 @@ static void tee_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_
     int h = lv_area_get_height(area);
     size_t nbytes = (size_t)w * h * 2;
     uint32_t crc = esp_crc32_le(0, px_map, nbytes);
-    printf("AREA %d %d %d %d %u %08lx\n", (int)area->x1, (int)area->y1, (int)area->x2,
-           (int)area->y2, (unsigned)nbytes, (unsigned long)crc);
-    static unsigned char line[97];
+    shot_line("AREA %d %d %d %d %u %08lx", (int)area->x1, (int)area->y1, (int)area->x2,
+              (int)area->y2, (unsigned)nbytes, (unsigned long)crc);
+    static unsigned char line[96 + 3];     // 72 bytes as base64, then "\r\n" (+ NUL while encoding)
     const unsigned char *src = px_map;
-    for (size_t left = nbytes, n = 0; left > 0; n++) {
+    for (size_t left = nbytes, n = 0; left > 0 && s_shot_ok; n++) {
         size_t chunk = left > 72 ? 72 : left, olen = 0;
         mbedtls_base64_encode(line, sizeof(line), &olen, src, chunk);
-        fwrite(line, 1, olen, stdout);
-        fputc('\n', stdout);
+        line[olen++] = '\r';
+        line[olen++] = '\n';
+        shot_write((const char *)line, olen);
         src += chunk;
         left -= chunk;
         // A whole-screen area is hundreds of KB of text: let the idle task in now
@@ -73,14 +113,20 @@ static int cmd_shot(int argc, char **argv)
     lv_display_t *disp = lv_display_get_default();
     s_orig_flush = disp->flush_cb;
     lv_display_set_flush_cb(disp, tee_flush_cb);
-    printf("SHOT-BEGIN %d %d rgb565\n", (int)lv_display_get_horizontal_resolution(disp),
-           (int)lv_display_get_vertical_resolution(disp));
+    fflush(stdout);                         // the echoed command goes out before the dump
+    s_shot_ok = true;
+    shot_line("SHOT-BEGIN %d %d rgb565", (int)lv_display_get_horizontal_resolution(disp),
+              (int)lv_display_get_vertical_resolution(disp));
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(disp);
-    printf("SHOT-END\n");
+    shot_line("SHOT-END");
     lv_display_set_flush_cb(disp, s_orig_flush);
     esp_log_level_set("*", prev);
     display_unlock();
+    if (!s_shot_ok) {                       // the host stopped reading: say so, if it's back
+        printf("ERR shot usb write timed out\n");
+        return 1;
+    }
     return 0;
 }
 

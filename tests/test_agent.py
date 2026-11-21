@@ -434,6 +434,26 @@ class ShotTest(unittest.TestCase):
         with self.assertRaises(sparklink.LinkError):
             devctl.parse_shot(self.dump(4, 4, [(0, 0, 3, 1)]))
 
+    def test_rejects_a_strip_missing_whole_lines(self):
+        # What 1.0.0's C6 sent now and then: whole base64 lines gone from the
+        # middle of a strip, every remaining line intact.
+        lines = self.dump(48, 4, [(0, 0, 47, 3)]).split(b"\r\n")
+        del lines[4:6]                        # 2 of the strip's 6 lines
+        with self.assertRaises(sparklink.LinkError) as e:
+            devctl.parse_shot(b"\r\n".join(lines))
+        self.assertIn("strip at 0,0 failed its size/CRC check", str(e.exception))
+
+    def test_reports_the_firmwares_error_mid_dump(self):
+        # The board stops a dump the host isn't reading with an ERR line in place
+        # of SHOT-END: show those words, not a coverage count.
+        lines = self.dump(48, 4, [(0, 0, 47, 1), (0, 2, 47, 3)]).split(b"\r\n")
+        between = next(i for i, ln in enumerate(lines) if ln.startswith(b"AREA 0 2"))
+        for cut in (between, between - 1):    # after a whole strip, and inside one
+            raw = b"\r\n".join(lines[:cut] + [b"ERR shot usb write timed out", b""])
+            with self.assertRaises(sparklink.LinkError) as e:
+                devctl.parse_shot(raw)
+            self.assertEqual(str(e.exception), "ERR shot usb write timed out")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

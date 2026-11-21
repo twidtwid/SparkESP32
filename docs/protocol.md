@@ -109,7 +109,8 @@ read-only machine vitals, and the installer's ufw rule only allows the local sub
 The rest of the console, used by `tools/provision.py` and `tools/devctl.py`. Every
 command's reply ends with a line starting `OK` or `ERR`, or with an `*-END` marker for
 multi-line output. A multi-line command that can't run says `ERR ...` instead and stops
-there (`shot` answers `ERR lock` when the UI is busy).
+there (`shot` answers `ERR lock` when the UI is busy, and ends in
+`ERR shot usb write timed out` instead of `SHOT-END` if the host stops reading mid-dump).
 
 | Command | Reply ends with | |
 |---|---|---|
