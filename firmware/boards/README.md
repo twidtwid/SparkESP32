@@ -8,7 +8,7 @@ contract in [`firmware/components/board_api`](../components/board_api/include).
 |---|---|---|---|
 | `waveshare-esp32c6-amoled-2.16` | ESP32-C6 | 2.16" 480×480 AMOLED, color | **Reference board.** Recommended, the default build, and every screenshot in the docs |
 | `lcdwiki-esp32s3-tft-2.8` | ESP32-S3 | 2.8" 240×320 color IPS TFT (ILI9341V), shown landscape | Verified on hardware. The common SPI-TFT case, and the worked example in [docs/adding-a-device.md](../../docs/adding-a-device.md) |
-| `waveshare-esp32s3-rlcd-4.2` | ESP32-S3 | 4.2" 300×400 reflective LCD, black and white, shown landscape | **Not yet run on the real board.** Written from Waveshare's and Zephyr's board files |
+| `waveshare-esp32s3-rlcd-4.2` | ESP32-S3 | 4.2" 300×400 reflective LCD, black and white, shown landscape | Verified on hardware. The example of a panel with no `esp_lcd` driver |
 
 ```sh
 make boards                                   # list them

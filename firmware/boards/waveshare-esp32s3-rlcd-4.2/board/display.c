@@ -23,23 +23,25 @@ static display_rot_t s_rot = DISPLAY_ROT_CW;
 
 static uint32_t tick_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-// A pixel of the 400x300 canvas into the panel's frame. CW is the board's own
-// landscape (the vendor's); CCW is the same turned 180 degrees.
+// A pixel of the 400x300 canvas into the panel's frame. CW is upright with the
+// board on its stand (checked on the real board); CCW is the same turned 180 degrees.
 static inline void put_px(int x, int y, bool white)
 {
-    int c = s_rot == DISPLAY_ROT_CCW ? y : (BOARD_UI_H - 1) - y;    // panel column, 0..299
-    int r = s_rot == DISPLAY_ROT_CCW ? (BOARD_UI_W - 1) - x : x;    // panel row, 0..399
+    int c = s_rot == DISPLAY_ROT_CW ? y : (BOARD_UI_H - 1) - y;     // panel column, 0..299
+    int r = s_rot == DISPLAY_ROT_CW ? (BOARD_UI_W - 1) - x : x;     // panel row, 0..399
     uint32_t i = (uint32_t)(r >> 1) * (RLCD_COLS / 4) + (c >> 2);
     uint8_t bit = 0x80 >> (((c & 3) << 1) | (r & 1));
     if (white) s_frame[i] |= bit;
     else s_frame[i] &= ~bit;
 }
 
-// Black or white by luminance (Rec. 601 weights on 6-bit channels), split at half.
+// Black or white by luminance (Rec. 601 weights on 6-bit channels). Only nearly
+// white (85%) stays white: text's anti-aliased edges go black, so strokes come out
+// bolder. Split at half, small text looked thin on the real panel.
 static inline bool is_white(uint16_t px)
 {
     unsigned r = (px >> 11) << 1, g = (px >> 5) & 0x3F, b = (px & 0x1F) << 1;
-    return r * 77 + g * 150 + b * 29 >= 63 * 128;
+    return r * 77 + g * 150 + b * 29 >= 63 * 218;
 }
 
 static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px_map)

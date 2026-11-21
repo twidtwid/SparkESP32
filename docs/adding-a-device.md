@@ -13,7 +13,7 @@ more boards show the two usual ways to drive a panel:
 | Board | Shows | Status |
 |---|---|---|
 | [LCDWiki ES3C28P](../firmware/boards/lcdwiki-esp32s3-tft-2.8) | The common case: a color SPI TFT (ILI9341V) with a backlight, driven by Espressif's `esp_lcd_ili9341` component. Start here. | Verified on hardware |
-| [Waveshare ESP32-S3-RLCD-4.2](../firmware/boards/waveshare-esp32s3-rlcd-4.2) | A panel with no `esp_lcd` driver: a hand-written ST7306 driver for a 1-bit reflective LCD, and a mono theme. | Not yet run on a real board |
+| [Waveshare ESP32-S3-RLCD-4.2](../firmware/boards/waveshare-esp32s3-rlcd-4.2) | A panel with no `esp_lcd` driver: a hand-written ST7306 driver for a 1-bit reflective LCD, and a mono theme. | Verified on hardware |
 
 AI agents: [AGENTS.md](../AGENTS.md#adding-a-new-device) has the same steps as a checklist.
 To submit a board, see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-new-device).

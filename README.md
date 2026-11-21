@@ -37,7 +37,7 @@ releases.
 |---|---|
 | [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm) | **Recommended.** 2.16" 480×480 color AMOLED. The reference board: everything here is shown and tested on it. |
 | [LCDWiki 2.8inch ESP32-S3 Display](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display) (ES3C28P) | 2.8" 240×320 color IPS TFT, landscape. A cheap, common board; same features in a compact layout. |
-| [Waveshare ESP32-S3-RLCD-4.2](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) | 4.2" black-and-white reflective LCD, landscape, no backlight. **Not yet run on a real board**: builds, but unverified. |
+| [Waveshare ESP32-S3-RLCD-4.2](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) | 4.2" black-and-white reflective LCD, landscape, no backlight. Same features in a bold mono layout. |
 
 The installer recognizes the board from its firmware or its chip and flashes the right
 image. Both S3 boards have the same chip, so a brand-new S3 board needs its id once:

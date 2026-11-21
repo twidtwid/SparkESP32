@@ -100,7 +100,7 @@ firmware/                  ESP-IDF 5.5 project; the board picks the chip
                            partitions.csv, dependencies.lock, README.md
     waveshare-esp32c6-amoled-2.16/   the reference board, and the default
     lcdwiki-esp32s3-tft-2.8/         ESP32-S3, 2.8" color SPI TFT (esp_lcd_ili9341)
-    waveshare-esp32s3-rlcd-4.2/      ESP32-S3, 1-bit reflective LCD; not yet run on one
+    waveshare-esp32s3-rlcd-4.2/      ESP32-S3, 1-bit reflective LCD (hand-written driver)
 tests/                     host tests: agent + tools (Python); parser and state machines (C)
 docs/                      protocol.md, troubleshooting.md, adding-a-device.md
 ```

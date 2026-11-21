@@ -1,9 +1,9 @@
-# Waveshare ESP32-S3-RLCD-4.2 (not yet run on the real board)
+# Waveshare ESP32-S3-RLCD-4.2
 
 [Product page](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) ·
-[docs](https://docs.waveshare.com/ESP32-S3-RLCD-4.2). Written from Waveshare's and
-Zephyr's board files, and builds clean, but it has **not been run on a real
-RLCD-4.2 yet** (see Verified, below). The C6 AMOLED stays the recommended board.
+[docs](https://docs.waveshare.com/ESP32-S3-RLCD-4.2). The example of a panel with no
+`esp_lcd` driver: a hand-written ST7306 driver and a mono theme. The C6 AMOLED stays
+the recommended board.
 
 | | |
 |---|---|
@@ -26,24 +26,36 @@ RLCD-4.2 yet** (see Verified, below). The C6 AMOLED stays the recommended board.
   sequence directly over an esp_lcd SPI IO handle. The register values come from
   Waveshare's ESP-IDF examples for this board and the Zephyr project's devicetree
   (both Apache-2.0); the code is our own (see THIRD_PARTY_NOTICES.md).
-- Waveshare's *factory* firmware programs four of those registers differently
-  (`C1` and `C4` source voltages `0x41`, oscillator `D8 A6 E9`, frame rate `B2 05`)
-  from its examples and Zephyr (`0x69`, `0x4B`, `80 E9`, `02`), which this driver
-  uses. If the panel shows no contrast on a real board, try the factory values first.
+- The values are the examples' and Zephyr's (`C1 0x69`, `C4 0x4B`, `D8 80 E9`,
+  `B2 02`); they give good contrast on the real board. Waveshare's factory test
+  firmware uses `0x41`, `0x41`, `A6 E9` and `05` for the same four registers.
+- Thresholding: only nearly white pixels (85% luminance) stay white, so the
+  anti-aliased edges of text go black and strokes come out bolder. At 50%, small
+  text looked thin on the real panel.
 - The controller packs a 4-column × 2-row block into each byte. LVGL renders a
   400×300 RGB565 canvas in PSRAM; `display.c` thresholds each pixel to black or
   white and writes it straight into the panel's 15 KB frame, rotated, then sends
   the whole frame (about 12 ms).
-- Landscape only: `rot cw` (the default) and `rot ccw` are the two landscape
-  orientations; `rot none` (portrait) answers `ERR rot none not supported on this board`.
+- Landscape only: `rot cw` (the default) is upright with the board on its stand;
+  `rot ccw` is the same turned 180 degrees. `rot none` (portrait) answers
+  `ERR rot none not supported on this board`.
 - `devctl.py shot` shows LVGL's render before the 1-bit conversion.
 
 ## Verified
 
-Not on hardware. The board first tested as "the RLCD" turned out to be a different
-board (an ES3C28P, now [its own port](../lcdwiki-esp32s3-tft-2.8/)): its handshake,
-screenshots and Wi-Fi checks passed with no RLCD attached, because none of them
-looks at the glass. What's verified: the firmware builds clean for this board and
-`tools/check_boards.py` passes. Before calling it supported, run the whole Verify
-table in [docs/adding-a-device.md](../../../docs/adding-a-device.md#8-verify) on a
-real RLCD-4.2, photo of the screen included.
+On the real board, 2026-11-21 (firmware 0.1.0, ESP-IDF 5.5.6), driven from a Mac:
+
+- flashes over USB, boots, answers the handshake (`board=waveshare-esp32s3-rlcd-4.2`)
+- the physical screen, photographed: upright on its stand, black on white, good contrast
+- demo screenshots at load 100: nothing clipped or touching
+- `rot cw` and `rot ccw` work and persist; `rot none` is refused
+- on Wi-Fi it joins, polls a Spark's agent, and reads `screen=online reason='via WI-FI'`
+  with live values
+- a reflash keeps the name and Wi-Fi settings
+
+Not yet: a cold plug-in, and the installer on a Spark.
+
+The first board tested as "the RLCD" was an ES3C28P from a swapped box (now
+[its own port](../lcdwiki-esp32s3-tft-2.8/)). Its handshake, screenshots and Wi-Fi all
+passed with no RLCD attached, which is why the guide now starts by proving which board
+you have.

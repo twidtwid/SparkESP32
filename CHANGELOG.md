@@ -37,8 +37,7 @@ First public release.
   Espressif's `esp_lcd_ili9341` driver, with a compact landscape layout. Verified on
   hardware.
 - The Waveshare ESP32-S3-RLCD-4.2: a 4.2" black-and-white reflective LCD with a
-  hand-written ST7306 driver and a mono layout. It builds, but hasn't been run on a
-  real board yet.
+  hand-written ST7306 driver and a mono layout. Verified on hardware.
 - Releases carry firmware for every board. The handshake reports `board=<id>`, and the
   installer picks the board from it (or from the chip, or `--board`) and flashes that
   board's images at the offsets in its `flash_args`.
