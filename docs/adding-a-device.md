@@ -7,10 +7,13 @@ writing that contract for your hardware, plus a UI layout if your screen is a ne
 size.
 
 The [Waveshare ESP32-C6-Touch-AMOLED-2.16](../firmware/boards/waveshare-esp32c6-amoled-2.16)
-is the reference board. It's the one to buy and the one every screenshot shows. The
-[Waveshare ESP32-S3-RLCD-4.2](../firmware/boards/waveshare-esp32s3-rlcd-4.2) was
-ported by following this guide. It's a different chip, a different panel controller,
-a black-and-white screen and a different resolution, so it makes a good worked example.
+is the reference board. It's the one to buy and the one every screenshot shows. Two
+more boards show the two usual ways to drive a panel:
+
+| Board | Shows | Status |
+|---|---|---|
+| [LCDWiki ES3C28P](../firmware/boards/lcdwiki-esp32s3-tft-2.8) | The common case: a color SPI TFT (ILI9341V) with a backlight, driven by Espressif's `esp_lcd_ili9341` component. Start here. | Verified on hardware |
+| [Waveshare ESP32-S3-RLCD-4.2](../firmware/boards/waveshare-esp32s3-rlcd-4.2) | A panel with no `esp_lcd` driver: a hand-written ST7306 driver for a 1-bit reflective LCD, and a mono theme. | Not yet run on a real board |
 
 AI agents: [AGENTS.md](../AGENTS.md#adding-a-new-device) has the same steps as a checklist.
 To submit a board, see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-new-device).
@@ -83,7 +86,7 @@ but reviewers will find it familiar.
 The examples use `acme-esp32s3-lcd-3.5`. Name yours `<vendor>-<chip>-<display>-<size>`,
 lowercase.
 
-### 1. Back up the factory firmware
+### 1. Back up the factory firmware, and check which board you have
 
 Before you flash anything, save the whole flash so you can put the board back the
 way it came:
@@ -93,6 +96,24 @@ python3 -m esptool -p <port> read_flash 0 0x1000000 factory-16MB.bin   # 0x80000
 ```
 
 Keep that file out of the repo.
+
+Then make sure the board is the one you think it is. Boards look alike, boxes get
+swapped, and listings carry the wrong photo. Two checks:
+
+- What the factory firmware was built for. Pull its app out and read its header:
+
+  ```bash
+  python3 -m esptool -p <port> read_flash 0x10000 0x300000 factory-app.bin   # the app's whole slot
+  python3 -m esptool image_info --version 2 factory-app.bin   # "Project name", build date, ESP-IDF
+  ```
+
+  `strings factory-app.bin | less` often names the panel controller too.
+- The screen's resolution and the controller printed on the board's back, against the
+  vendor's page.
+
+SparkESP32's second port was written for the wrong board this way: the board on the
+bench was a 2.8" TFT, not the RLCD we took it for, and every check that doesn't
+look at the glass passed anyway.
 
 ### 2. Gather the hardware facts
 
@@ -113,10 +134,11 @@ for your controller (`esp_lcd_<controller>` on the
 
 ### 3. Create the board directory
 
-Start from whichever existing board is closer to yours:
+Start from whichever existing board is closer to yours: the ES3C28P for a color
+panel with an `esp_lcd` driver, the RLCD for a panel you have to drive yourself.
 
 ```bash
-cp -R firmware/boards/waveshare-esp32s3-rlcd-4.2 firmware/boards/acme-esp32s3-lcd-3.5
+cp -R firmware/boards/lcdwiki-esp32s3-tft-2.8 firmware/boards/acme-esp32s3-lcd-3.5
 ```
 
 Delete the copy's `dependencies.lock`; your first build writes a new one.
@@ -149,8 +171,9 @@ Pick by panel type and memory:
 
 | Your board | Do what |
 |---|---|
-| A panel with an `esp_lcd` driver | Use `esp_lcd_panel_draw_bitmap()` in the flush callback, with two small DMA draw buffers in `LV_DISPLAY_RENDER_MODE_PARTIAL`. The C6's `display.c` is this case. |
-| A controller with no driver, or a 1-bit panel | Keep a frame buffer in the panel's own format. In the flush callback, convert LVGL's RGB565 pixels into it, and send the whole frame on the last flush (`lv_display_flush_is_last()`). The S3's `display.c` is this case. |
+| A panel with an `esp_lcd` driver | Render in strips (`LV_DISPLAY_RENDER_MODE_PARTIAL`, a small DMA buffer) and send each with `esp_lcd_panel_draw_bitmap()`. Most SPI panels read RGB565 big-endian: `lv_draw_sw_rgb565_swap()` the strip first. The ES3C28P's `display.c` is the plainest example; the C6's adds software rotation. |
+| A controller with no driver, or a 1-bit panel | Keep a frame buffer in the panel's own format. In the flush callback, convert LVGL's RGB565 pixels into it, and send the whole frame on the last flush (`lv_display_flush_is_last()`). The RLCD's `display.c` is this case. |
+| A backlight | Keep it off until the first real frame has gone out, so the panel's power-on garbage never shows. |
 | No PSRAM | Keep the draw buffers small (1/10 of the screen or less), in internal DMA-capable RAM. |
 
 Rotation:
@@ -179,9 +202,12 @@ static const layout_t L = { ... };
 #endif
 ```
 
-Copy the closest one, add an `#elif` for your size, and scale the positions. The
-fonts available are Montserrat 14, 16, 28 and 48. Check every element for overlaps
-with `tools/devctl.py demoshot`, at loads 0, 70 and 100 (the widest numbers).
+Copy the closest one, add an `#elif` for your size, and scale the positions. Every
+board has Montserrat 14, 16, 28 and 48. A small screen may need a size in between
+for the title and the ring values: turn it on in your board's `sdkconfig.defaults`
+(the ES3C28P adds `CONFIG_LV_FONT_MONTSERRAT_24=y`) and name it in your layout. Check
+every element for overlaps with `tools/devctl.py demoshot`, at loads 0, 70 and 100
+(the widest numbers).
 
 ### 7. Build, check, flash
 
@@ -235,5 +261,12 @@ why the photo is on the list.
   busy loops to your flush callback.
 - **Lock everything.** LVGL calls from any task without `display_lock()` will
   crash eventually, usually days later. Your LVGL task must take the same lock around `lv_timer_handler()`.
+- **Keep the SPI interrupt small.** esp_lcd's "transfer done" callback runs in an
+  interrupt, which can land while flash is busy saving a setting. Code in flash
+  (LVGL included) can't run then: give a semaphore from the callback and call
+  `lv_display_flush_ready()` from the flush instead.
+- **A black screen is usually the backlight.** A TFT with its backlight off looks
+  powered down no matter what you send it. Find the backlight pin before you debug
+  the panel.
 - **Board IDs are permanent.** The ID ends up in release asset names and in the
   handshake, and the installer matches on it. Don't rename a board after it ships.

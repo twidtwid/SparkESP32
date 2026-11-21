@@ -27,6 +27,7 @@ typedef struct {
     int ring_cy, ring_r, ring_w;            // three ring gauges in a row
     int ring_cx[3];
     int ring_val_dy, ring_sub_dy, ring_title_dy;
+    const lv_font_t *ring_val_font;         // the big % in each ring
     int cores_y, cells_y, cells_h, cells_gap;   // the heatmap row
     int tile_x[2], tile_y, tile_w, tile_h;  // temperature and power
     int tile_radius, tile_pad, tile_label_y, tile_value_y;
@@ -38,7 +39,7 @@ static const layout_t L = {
     .margin = 22, .title_y = 14, .title_w = 280, .title_font = &lv_font_montserrat_28,
     .status_y = 22, .reason_y = 46, .dot = 14,
     .ring_cy = 150, .ring_r = 58, .ring_w = 10, .ring_cx = {92, 240, 388},
-    .ring_val_dy = -6, .ring_sub_dy = 16, .ring_title_dy = 6,
+    .ring_val_dy = -6, .ring_sub_dy = 16, .ring_title_dy = 6, .ring_val_font = &lv_font_montserrat_28,
     .cores_y = 250, .cells_y = 276, .cells_h = 30, .cells_gap = 3,
     .tile_x = {16, 248}, .tile_y = 322, .tile_w = 216, .tile_h = 142,
     .tile_radius = 14, .tile_pad = 16, .tile_label_y = 14, .tile_value_y = -12,
@@ -49,10 +50,21 @@ static const layout_t L = {
     .margin = 14, .title_y = 8, .title_w = 220, .title_font = &lv_font_montserrat_28,
     .status_y = 12, .reason_y = 34, .dot = 12,
     .ring_cy = 108, .ring_r = 46, .ring_w = 8, .ring_cx = {72, 200, 328},
-    .ring_val_dy = -5, .ring_sub_dy = 14, .ring_title_dy = 4,
+    .ring_val_dy = -5, .ring_sub_dy = 14, .ring_title_dy = 4, .ring_val_font = &lv_font_montserrat_28,
     .cores_y = 182, .cells_y = 200, .cells_h = 22, .cells_gap = 2,
     .tile_x = {14, 206}, .tile_y = 230, .tile_w = 180, .tile_h = 62,
     .tile_radius = 8, .tile_pad = 10, .tile_label_y = 6, .tile_value_y = -4,
+    .tile_label_font = &lv_font_montserrat_14, .tile_value_font = &lv_font_montserrat_28,
+};
+#elif BOARD_UI_W == 320 && BOARD_UI_H == 240      // 2.8" landscape (the S3 TFT): tight
+static const layout_t L = {
+    .margin = 10, .title_y = 8, .title_w = 170, .title_font = &lv_font_montserrat_24,
+    .status_y = 8, .reason_y = 28, .dot = 10,
+    .ring_cy = 88, .ring_r = 42, .ring_w = 6, .ring_cx = {56, 160, 264},
+    .ring_val_dy = -5, .ring_sub_dy = 14, .ring_title_dy = 2, .ring_val_font = &lv_font_montserrat_24,
+    .cores_y = 152, .cells_y = 168, .cells_h = 14, .cells_gap = 1,
+    .tile_x = {10, 164}, .tile_y = 186, .tile_w = 146, .tile_h = 52,
+    .tile_radius = 8, .tile_pad = 8, .tile_label_y = 3, .tile_value_y = -2,
     .tile_label_font = &lv_font_montserrat_14, .tile_value_font = &lv_font_montserrat_28,
 };
 #else
@@ -139,7 +151,7 @@ static void make_ring(ring_t *rg, int cx, const char *title)
     rg->arc = arc;
 
     // children of the arc, aligned once: LVGL re-centres them when the text changes
-    rg->val = mklabel(arc, &lv_font_montserrat_28, C_WHITE, "--");
+    rg->val = mklabel(arc, L.ring_val_font, C_WHITE, "--");
     lv_obj_align(rg->val, LV_ALIGN_CENTER, 0, L.ring_val_dy);
     rg->sub = mklabel(arc, &lv_font_montserrat_14, C_DIM, "");
     lv_obj_align(rg->sub, LV_ALIGN_CENTER, 0, L.ring_sub_dy);

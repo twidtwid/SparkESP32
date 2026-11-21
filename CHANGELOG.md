@@ -33,8 +33,12 @@ First public release.
 - Builds for more than one board. Each lives in `firmware/boards/<id>/` behind a small
   contract (`firmware/components/board_api`); `make build BOARD=<id>` picks one, and the
   Waveshare ESP32-C6-Touch-AMOLED-2.16 stays the default and the reference.
-- A second board, the Waveshare ESP32-S3-RLCD-4.2: a 4.2" black-and-white reflective LCD,
-  landscape, with a mono layout of the same screen.
+- The LCDWiki 2.8inch ESP32-S3 Display (ES3C28P): a 2.8" 240×320 color SPI TFT on
+  Espressif's `esp_lcd_ili9341` driver, with a compact landscape layout. Verified on
+  hardware.
+- The Waveshare ESP32-S3-RLCD-4.2: a 4.2" black-and-white reflective LCD with a
+  hand-written ST7306 driver and a mono layout. It builds, but hasn't been run on a
+  real board yet.
 - Releases carry firmware for every board. The handshake reports `board=<id>`, and the
   installer picks the board from it (or from the chip, or `--board`) and flashes that
   board's images at the offsets in its `flash_args`.

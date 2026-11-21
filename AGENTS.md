@@ -99,7 +99,8 @@ firmware/                  ESP-IDF 5.5 project; the board picks the chip
   boards/<id>/             one per board: board/ component, sdkconfig.defaults,
                            partitions.csv, dependencies.lock, README.md
     waveshare-esp32c6-amoled-2.16/   the reference board, and the default
-    waveshare-esp32s3-rlcd-4.2/      second board: ESP32-S3, 1-bit reflective LCD
+    lcdwiki-esp32s3-tft-2.8/         ESP32-S3, 2.8" color SPI TFT (esp_lcd_ili9341)
+    waveshare-esp32s3-rlcd-4.2/      ESP32-S3, 1-bit reflective LCD; not yet run on one
 tests/                     host tests: agent + tools (Python); parser and state machines (C)
 docs/                      protocol.md, troubleshooting.md, adding-a-device.md
 ```
@@ -137,7 +138,11 @@ This is the order to work in and what to prove at each step.
    `python3 -m serial.tools.list_ports -v`, 8 MB+ flash. If any of these fail, stop and
    tell the human why.
 2. **Back up the factory flash** (`esptool read_flash 0 <flash size> factory.bin`) to a
-   path outside the repo, and tell the human where it is.
+   path outside the repo, and tell the human where it is. Then **prove which board it
+   is**: `esptool image_info --version 2` on its app (see the guide's step 1), and the
+   resolution and controller printed on the board against the vendor's page. Don't take
+   the box's word for it: a board that isn't what it says passes every check except
+   the human looking at the screen.
 3. **Collect facts, not code.** Pins, panel controller, init sequence, power-enable
    order, from the vendor's docs. Check the license of any vendor example before
    reusing it; with no license, write the driver yourself and cite the source in the
@@ -155,8 +160,9 @@ This is the order to work in and what to prove at each step.
    `make flash BOARD=<id> PORT=...`.
 8. **Verify on hardware** with the table in the guide's "Verify" step. You can run the
    handshake, demoshot, rotations, Wi-Fi and reflash checks yourself. Only the human can
-   check the physical screen (upright, not mirrored, not inverted) and do the cold
-   plug-ins. Ask for those in one batch, once, at the end.
+   check the physical screen (lit, upright, not mirrored, not inverted) and do the cold
+   plug-ins. Ask for those in one batch, once, at the end, and don't report the board
+   as working until the screen check is in.
 9. **Write the board README**: chip, display, pins, sources, quirks, and a "Verified"
    section that says what was checked on the real board and what wasn't. Don't claim a
    check nobody ran.

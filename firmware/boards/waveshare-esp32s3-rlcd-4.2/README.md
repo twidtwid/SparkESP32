@@ -1,9 +1,9 @@
-# Waveshare ESP32-S3-RLCD-4.2 (second board)
+# Waveshare ESP32-S3-RLCD-4.2 (not yet run on the real board)
 
 [Product page](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) ·
-[docs](https://docs.waveshare.com/ESP32-S3-RLCD-4.2). Added to prove the port
-path in [docs/adding-a-device.md](../../../docs/adding-a-device.md); the C6 AMOLED
-stays the recommended board.
+[docs](https://docs.waveshare.com/ESP32-S3-RLCD-4.2). Written from Waveshare's and
+Zephyr's board files, and builds clean, but it has **not been run on a real
+RLCD-4.2 yet** (see Verified, below). The C6 AMOLED stays the recommended board.
 
 | | |
 |---|---|
@@ -24,8 +24,12 @@ stays the recommended board.
 
 - No esp_lcd panel driver fits the ST7306, so `board.c` sends its power-up
   sequence directly over an esp_lcd SPI IO handle. The register values come from
-  the Zephyr project's devicetree for this board (Apache-2.0) and agree with
-  Waveshare's documentation; the code is our own (see THIRD_PARTY_NOTICES.md).
+  Waveshare's ESP-IDF examples for this board and the Zephyr project's devicetree
+  (both Apache-2.0); the code is our own (see THIRD_PARTY_NOTICES.md).
+- Waveshare's *factory* firmware programs four of those registers differently
+  (`C1` and `C4` source voltages `0x41`, oscillator `D8 A6 E9`, frame rate `B2 05`)
+  from its examples and Zephyr (`0x69`, `0x4B`, `80 E9`, `02`), which this driver
+  uses. If the panel shows no contrast on a real board, try the factory values first.
 - The controller packs a 4-column × 2-row block into each byte. LVGL renders a
   400×300 RGB565 canvas in PSRAM; `display.c` thresholds each pixel to black or
   white and writes it straight into the panel's 15 KB frame, rotated, then sends
@@ -36,13 +40,10 @@ stays the recommended board.
 
 ## Verified
 
-On the real board, 2026-11-20 (firmware 0.1.0, ESP-IDF 5.5.6), driven from a Mac:
-
-- flashes over USB, boots, answers the handshake (`board=waveshare-esp32s3-rlcd-4.2`)
-- demo samples render; `rot ccw` / `rot cw` work and `rot none` is refused
-- on Wi-Fi it joins, polls a Spark's agent, and reads `screen=online reason='via WI-FI'`
-  with live values
-
-Not yet checked by a person looking at it: that the image is upright in
-`rot cw` and black-on-white rather than inverted, and a cold plug-in (the C6's
-USB erratum; `main.c` restarts once at power-on on every board, which is harmless here).
+Not on hardware. The board first tested as "the RLCD" turned out to be a different
+board (an ES3C28P, now [its own port](../lcdwiki-esp32s3-tft-2.8/)): its handshake,
+screenshots and Wi-Fi checks passed with no RLCD attached, because none of them
+looks at the glass. What's verified: the firmware builds clean for this board and
+`tools/check_boards.py` passes. Before calling it supported, run the whole Verify
+table in [docs/adding-a-device.md](../../../docs/adding-a-device.md#8-verify) on a
+real RLCD-4.2, photo of the screen included.

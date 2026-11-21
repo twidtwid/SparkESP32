@@ -21,6 +21,7 @@ Fetched at build time by the ESP-IDF component manager (pinned per board in
 | [LVGL](https://github.com/lvgl/lvgl) | 9.6.0 | MIT |
 | [esp_lvgl_adapter](https://components.espressif.com/components/espressif/esp_lvgl_adapter) (Espressif) | 0.7.9 | Apache-2.0. ESP32-C6 AMOLED only |
 | [esp_lcd_sh8601](https://components.espressif.com/components/espressif/esp_lcd_sh8601) (Espressif) | 2.0.1 | Apache-2.0. ESP32-C6 AMOLED only |
+| [esp_lcd_ili9341](https://components.espressif.com/components/espressif/esp_lcd_ili9341) (Espressif) | 2.1.0 | Apache-2.0. ES3C28P only |
 
 The ESP32-S3 reflective-LCD build uses only ESP-IDF and LVGL from this table.
 
@@ -49,4 +50,5 @@ project.
 | Board | Source of the hardware facts |
 |---|---|
 | Waveshare ESP32-C6-Touch-AMOLED-2.16 | Waveshare's [documentation](https://docs.waveshare.com/ESP32-C6-Touch-AMOLED-2.16) and schematic |
-| Waveshare ESP32-S3-RLCD-4.2 | Waveshare's [documentation](https://docs.waveshare.com/ESP32-S3-RLCD-4.2), and the [Zephyr project's devicetree](https://github.com/zephyrproject-rtos/zephyr/tree/main/boards/waveshare/esp32s3_rlcd_4_2) for the board (Apache-2.0) for the ST7306 register values. No code was copied |
+| LCDWiki 2.8inch ESP32-S3 Display (ES3C28P) | LCDWiki's [pin table and ILI9341V init code](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display), used for the pins and the panel's power, VCOM and gamma values. No code was copied |
+| Waveshare ESP32-S3-RLCD-4.2 | Waveshare's [documentation](https://docs.waveshare.com/ESP32-S3-RLCD-4.2) and [ESP-IDF examples](https://github.com/waveshareteam/ESP32-S3-RLCD-4.2) (Apache-2.0), and the [Zephyr project's devicetree](https://github.com/zephyrproject-rtos/zephyr/tree/main/boards/waveshare/esp32s3_rlcd_4_2) for the board (Apache-2.0), for the ST7306 register values. No code was copied |
