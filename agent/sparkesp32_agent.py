@@ -6,6 +6,11 @@ Samples once a second:
     /proc/stat     -> CPU % (aggregate + per core)
     /proc/meminfo  -> unified memory used/total (decimal MB, matches NVIDIA's GB)
 
+or, on a Spark that runs a Sparkline agent (github.com/sfxnz/sparkline) and was set
+up to use it (install.sh does that), reads the same values from Sparkline's
+/api/v1/snapshot instead, and falls back to sampling itself if Sparkline stops
+answering.
+
 and publishes the same `stat` line (protocol v1, see docs/protocol.md) two ways:
     1. USB serial: pushed to the display while it's plugged in
     2. HTTP: GET /stat on :8787, polled by the display over Wi-Fi; GET /healthz is JSON
@@ -25,6 +30,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -48,6 +55,8 @@ GPU_STALE_S = 5.0                     # nvidia-smi values older than this are re
 GPU_STALL_S = 10.0                    # it prints a line a second: this long silent, it's hung
 NVSMI = ["nvidia-smi", "-i", "0", "--query-gpu=utilization.gpu,temperature.gpu,power.draw",
          "--format=csv,noheader,nounits", "-lms", "1000"]
+SPARKLINE_TIMEOUT_S = 1.5             # one snapshot request; slower than this counts as a failure
+SPARKLINE_RETRY_S = 30.0              # after a failure, sample ourselves this long before asking again
 
 
 class RateLimitedLog:
@@ -106,6 +115,7 @@ class GpuReader(threading.Thread):
 
     Sampling never waits on nvidia-smi: fields older than GPU_STALE_S go out as
     unknown ("-"). The child's state, published in /healthz as gpu_source:
+      idle         not started: the readings come from Sparkline (see /healthz "source")
       starting     spawned, no line yet
       streaming    a line a second
       stalled      silent for GPU_STALL_S (a hung driver call): killed, then respawned
@@ -115,7 +125,7 @@ class GpuReader(threading.Thread):
 
     def __init__(self, stop):
         super().__init__(daemon=True, name="gpu")
-        self.stop, self.state, self.error = stop, "starting", None
+        self.stop, self.state, self.error = stop, "idle", None
         self.reading = ((None, None, None), 0.0)   # (values, monotonic time); replaced whole
         self.first = threading.Event()             # set by the first reading
 
@@ -125,6 +135,12 @@ class GpuReader(threading.Thread):
             return round(float(s.strip()) * scale)
         except ValueError:      # "[N/A]" for fields the GPU doesn't report
             return None
+
+    def ensure_started(self):
+        """Start the child on first use: with Sparkline as the source it may never be needed."""
+        if self.state == "idle":
+            self.state = "starting"
+            self.start()
 
     def run(self):
         backoff = 1.0
@@ -180,6 +196,72 @@ class GpuReader(threading.Thread):
         return values if time.monotonic() - at <= GPU_STALE_S else (None, None, None)
 
 
+def snapshot_fields(s):
+    """Our sample fields from a Sparkline agent's /api/v1/snapshot (its Sample model). Raises
+    KeyError, TypeError, IndexError, AttributeError or ValueError on one it doesn't recognize."""
+    def pct(v):
+        return max(0, min(100, round(v)))
+
+    def num(v, scale=1):
+        return None if v is None else round(float(v) * scale)
+
+    cpu, mem = s["cpu"], s["mem"]
+    gpu = s["gpu"][0] if s["gpu"] else {}
+    return dict(cpu=pct(cpu["util"]), gpu=None if gpu.get("util") is None else pct(gpu["util"]),
+                mem_used_mb=round(mem["used"] / 1e6), mem_total_mb=round(mem["total"] / 1e6),
+                temp_c=num(gpu.get("temp_c")), power_dw=num(gpu.get("power_w"), 10),
+                cores=[pct(c) for c in cpu["per_core"]][:MAX_CORES])
+
+
+class SparklineSource:
+    """Readings from a Sparkline agent (github.com/sfxnz/sparkline) on this Spark.
+
+    Asks GET <url>/api/v1/snapshot with Sparkline's agent token, once per tick. Any
+    failure (refused, timeout, 401, a stale or unrecognized sample) makes read() return
+    None, so the sampler uses its own readings, and Sparkline is asked again after
+    SPARKLINE_RETRY_S. Published in /healthz as "sparkline": {url, state, error}.
+    The token is only ever sent to that URL: never logged, never in /healthz.
+    """
+
+    def __init__(self, url, token):
+        self.url = url.rstrip("/")
+        self._req = urllib.request.Request(self.url + "/api/v1/snapshot",
+                                           headers={"Authorization": f"Bearer {token}"})
+        self.state, self.error, self._retry_at = "starting", None, 0.0
+
+    def read(self):
+        """Our sample fields, or None (self.error says why) to sample ourselves this tick."""
+        if time.monotonic() < self._retry_at:
+            return None
+        try:
+            with urllib.request.urlopen(self._req, timeout=SPARKLINE_TIMEOUT_S) as r:
+                s = json.load(r)
+            age = time.time() - s["ts"]
+            if age > STALE_S:
+                raise ValueError(f"its latest sample is {age:.0f}s old")
+            fields = snapshot_fields(s)
+        except urllib.error.HTTPError as e:
+            e.close()
+            why = f"HTTP {e.code}" + (" (token rejected: re-run install.sh)" if e.code in (401, 403) else "")
+        except (KeyError, TypeError, IndexError, AttributeError) as e:
+            why = f"unrecognized snapshot ({type(e).__name__}: {e})"
+        except (OSError, ValueError) as e:      # refused, timeout, bad JSON, stale
+            why = str(e) or type(e).__name__
+        else:
+            if self.state != "ok":
+                log.info("reading from Sparkline at %s", self.url)
+            self.state, self.error = "ok", None
+            return fields
+        self.state, self.error = "error", why
+        self._retry_at = time.monotonic() + SPARKLINE_RETRY_S
+        rl.warn("sparkline", "Sparkline at %s: %s; sampling ourselves, asking again every %.0fs",
+                self.url, why, SPARKLINE_RETRY_S)
+        return None
+
+    def health(self):
+        return {"url": self.url, "state": self.state, "error": self.error}
+
+
 def fmt(v):
     return "-" if v is None else str(v)
 
@@ -196,8 +278,8 @@ class Sampler:
     status, both read by the HTTP handler. Each is replaced whole, never mutated,
     so readers need no lock."""
 
-    def __init__(self, gpu):
-        self.gpu, self.host = gpu, short_hostname()
+    def __init__(self, gpu, sparkline=None):
+        self.gpu, self.sparkline, self.host = gpu, sparkline, short_hostname()
         self.snap = (None, 0.0, {})          # (line, monotonic time of it, /healthz fields)
         self.display = {"state": "searching"}    # the USB link, kept by serial_loop
         self._prev = read_cpu_times()
@@ -209,12 +291,21 @@ class Sampler:
         cores = [pct(p, c) for p, c in zip(self._prev[1:], cur[1:], strict=False)][:MAX_CORES]
         self._prev = cur
         memu, memt = read_mem_mb()
-        gpu, temp, pow_dw = self.gpu.latest()
+        got = self.sparkline.read() if self.sparkline else None
+        if got:
+            cpu, gpu, memu, memt = got["cpu"], got["gpu"], got["mem_used_mb"], got["mem_total_mb"]
+            temp, pow_dw, cores = got["temp_c"], got["power_dw"], got["cores"]
+        else:
+            self.gpu.ensure_started()
+            gpu, temp, pow_dw = self.gpu.latest()
         line = (f"stat {cpu} {fmt(gpu)} {memu} {memt} {fmt(temp)} {fmt(pow_dw)} "
                 f"{','.join(map(str, cores)) or '-'} {self.host}")
         sample = dict(host=self.host, cpu=cpu, gpu=gpu, mem_used_mb=memu, mem_total_mb=memt,
                       temp_c=temp, power_w=None if pow_dw is None else pow_dw / 10,
-                      cores=cores, gpu_source=self.gpu.state, gpu_error=self.gpu.error)
+                      cores=cores, source="sparkline" if got else "own",
+                      gpu_source=self.gpu.state, gpu_error=self.gpu.error)
+        if self.sparkline:
+            sample["sparkline"] = self.sparkline.health()
         self.snap = (line, time.monotonic(), sample)
 
     def latest(self):
@@ -359,6 +450,9 @@ def main():
     ap.add_argument("--no-serial", action="store_true", help="HTTP only")
     ap.add_argument("--no-http", action="store_true", help="USB only")
     ap.add_argument("--once", action="store_true", help="print one stat line and exit")
+    ap.add_argument("--sparkline-url", default=os.environ.get("SPARKLINE_URL"),
+                    help="read from the Sparkline agent at this URL (token in $SPARKLINE_TOKEN); "
+                         "install.sh sets both when it finds one")
     ap.add_argument("--version", action="version", version=__version__)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -367,10 +461,13 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
 
+    token = os.environ.get("SPARKLINE_TOKEN", "")
+    sparkline = SparklineSource(args.sparkline_url, token) if args.sparkline_url and token else None
     gpu = GpuReader(stop)
-    gpu.start()
-    sampler = Sampler(gpu)
-    gpu.first.wait(2)              # so the first line already has GPU values, not "-"
+    sampler = Sampler(gpu, sparkline)
+    if sparkline is None:
+        gpu.ensure_started()
+        gpu.first.wait(2)          # so the first line already has GPU values, not "-"
     sampler.tick()
 
     if args.once:

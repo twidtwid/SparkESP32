@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- On a Spark that runs [Sparkline](https://github.com/sfxnz/sparkline), the agent reads
+  Sparkline's samples (`GET /api/v1/snapshot`) instead of running `nvidia-smi` a second time,
+  so the display and the Sparkline dashboard show the same numbers. `install.sh` finds a
+  running Sparkline agent and keeps its token in a root-only file for the service; the token
+  never goes to the display. When Sparkline doesn't answer, the agent samples by itself and
+  asks again every 30 s. `/healthz` reports `source` and a `sparkline` state;
+  `install.sh --no-sparkline` turns it off.
+
 ## 1.0.1 — 2026-11-21
 
 ### Fixed

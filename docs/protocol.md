@@ -97,7 +97,7 @@ The agent serves, on port 8787 by default:
 | Request | Response |
 |---|---|
 | `GET /stat` | `200`, `text/plain`, the line + `\n`, with `Content-Length`. `503 stale` if the sampler hasn't produced a line in 5 s. |
-| `GET /healthz` | `200`, JSON: version, sample age, display connection, and each value broken out |
+| `GET /healthz` | `200`, JSON: version, sample age, display connection, each value broken out, and where the readings come from (`source`: `own` or `sparkline`) |
 | anything else | `404` |
 
 The board polls `GET /stat` once a second with a 2.5 s timeout. It needs status 200, a

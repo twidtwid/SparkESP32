@@ -45,7 +45,10 @@ import sparklink  # noqa: E402
 
 class FakeGpu:
     def __init__(self, values=(91, 60, 410), state="streaming"):
-        self.values, self.state, self.error = values, state, None
+        self.values, self.state, self.error, self.started = values, state, None, False
+
+    def ensure_started(self):
+        self.started = True
 
     def latest(self):
         return self.values
@@ -103,6 +106,39 @@ class SamplerTest(unittest.TestCase):
                           ("my_box", "my_box"), ("caf\u00e9", "-"), ("", "-"), ("x" * 64, "-")]:
             agent.socket.gethostname = lambda raw=raw: raw
             self.assertEqual(agent.short_hostname(), want, raw)
+
+    def test_sparkline_values_replace_our_own(self):
+        class Up:
+            def read(self):
+                return dict(cpu=7, gpu=33, mem_used_mb=99646, mem_total_mb=130661, temp_c=36,
+                            power_dw=107, cores=[1, 2, 3])
+
+            def health(self):
+                return {"url": "http://x:9750", "state": "ok", "error": None}
+        gpu = FakeGpu()
+        s = self.make(gpu, [[(0, 0), (0, 0)], [(0, 100), (0, 100)]])
+        s.sparkline = Up()
+        s.tick()
+        line, _, sample = s.latest()
+        self.assertEqual(line, "stat 7 33 99646 130661 36 107 1,2,3 " + agent.short_hostname())
+        self.assertEqual((sample["source"], sample["sparkline"]["state"]), ("sparkline", "ok"))
+        self.assertFalse(gpu.started)              # no nvidia-smi while Sparkline answers
+
+    def test_sparkline_failure_falls_back_to_our_own(self):
+        class Down:
+            def read(self):
+                return None
+
+            def health(self):
+                return {"url": "http://x:9750", "state": "error", "error": "HTTP 401"}
+        gpu = FakeGpu()
+        s = self.make(gpu, [[(0, 0), (0, 0)], [(0, 100), (50, 100)]])
+        s.sparkline = Down()
+        s.tick()
+        line, _, sample = s.latest()
+        self.assertEqual(line, "stat 100 91 46328 130661 60 410 50 " + agent.short_hostname())
+        self.assertEqual(sample["source"], "own")
+        self.assertTrue(gpu.started)
 
     def test_pct_clamps_and_handles_no_progress(self):
         self.assertEqual(agent.pct((5, 10), (5, 10)), 0)
@@ -453,6 +489,104 @@ class ShotTest(unittest.TestCase):
             with self.assertRaises(sparklink.LinkError) as e:
                 devctl.parse_shot(raw)
             self.assertEqual(str(e.exception), "ERR shot usb write timed out")
+
+
+# ------------------------------------------------------------------ Sparkline
+
+FIXTURE = os.path.join(ROOT, "tests", "fixtures", "sparkline-snapshot.json")
+
+
+def snapshot(**changes):
+    with open(FIXTURE) as f:
+        s = json.load(f)
+    s["ts"] = time.time()
+    s.update(changes)
+    return s
+
+
+class SnapshotFieldsTest(unittest.TestCase):
+    def test_maps_a_real_snapshot(self):
+        # recorded from a Spark next to the agent's own line: stat 0 0 99646 130661 36 107 ...
+        got = agent.snapshot_fields(snapshot())
+        self.assertEqual((got["cpu"], got["gpu"], got["mem_used_mb"], got["mem_total_mb"]),
+                         (0, 0, 99646, 130661))
+        self.assertEqual((got["temp_c"], got["power_dw"]), (36, 107))
+        self.assertEqual(len(got["cores"]), 20)
+
+    def test_clamps_and_unknowns(self):
+        s = snapshot()
+        s["cpu"]["util"], s["cpu"]["per_core"][0] = 100.4, -0.2
+        s["gpu"][0].update(util=None, temp_c=None, power_w=None)
+        got = agent.snapshot_fields(s)
+        self.assertEqual((got["cpu"], got["cores"][0]), (100, 0))
+        self.assertEqual((got["gpu"], got["temp_c"], got["power_dw"]), (None, None, None))
+        self.assertEqual(agent.snapshot_fields(snapshot(gpu=[]))["gpu"], None)   # no GPU at all
+
+    def test_rejects_what_it_doesnt_recognize(self):
+        for bad in ({"cpu": {}}, snapshot(mem=None), snapshot(gpu="oops"), snapshot(cpu={"util": "x"})):
+            with self.subTest(bad=str(bad)[:40]), self.assertRaises((KeyError, TypeError, AttributeError)):
+                agent.snapshot_fields(bad)
+
+
+class SparklineSourceTest(unittest.TestCase):
+    """SparklineSource against a stand-in Sparkline agent on 127.0.0.1."""
+
+    TOKEN = "t" * 43
+
+    def serve(self, status=200, body=None):
+        test, seen = self, []
+
+        class Handler(agent.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Authorization")))
+                data = (json.dumps(snapshot()) if body is None else body).encode()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+        httpd = agent.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        test.addCleanup(httpd.server_close)
+        test.addCleanup(httpd.shutdown)
+        return f"http://127.0.0.1:{httpd.server_port}", seen
+
+    def test_reads_with_the_bearer_token(self):
+        url, seen = self.serve()
+        src = agent.SparklineSource(url, self.TOKEN)
+        self.assertEqual(src.read()["mem_total_mb"], 130661)
+        self.assertEqual(seen, [("/api/v1/snapshot", "Bearer " + self.TOKEN)])
+        self.assertEqual(src.health(), {"url": url, "state": "ok", "error": None})
+
+    def test_token_rejected(self):
+        url, _ = self.serve(status=401, body='{"detail": "Missing or invalid bearer token"}')
+        src = agent.SparklineSource(url, self.TOKEN)
+        self.assertIsNone(src.read())
+        self.assertIn("token rejected", src.error)
+        self.assertNotIn(self.TOKEN, json.dumps(src.health()))
+
+    def test_stale_garbled_and_unrecognized_snapshots(self):
+        for body, why in [(json.dumps(snapshot(ts=time.time() - 60)), "old"),
+                          ("not json", "Expecting value"),
+                          (json.dumps({"ts": time.time()}), "unrecognized"),
+                          (json.dumps(snapshot(gpu="oops")), "unrecognized")]:
+            with self.subTest(why=why):
+                url, _ = self.serve(body=body)
+                src = agent.SparklineSource(url, self.TOKEN)
+                self.assertIsNone(src.read())
+                self.assertIn(why, src.error)
+
+    def test_unreachable_then_waits_before_asking_again(self):
+        url, seen = self.serve()
+        dead = agent.SparklineSource("http://127.0.0.1:9", self.TOKEN)     # nothing listens on 9
+        self.assertIsNone(dead.read())
+        self.assertEqual(dead.state, "error")
+        src = agent.SparklineSource(url, self.TOKEN)
+        src._retry_at = time.monotonic() + 60       # as if it had just failed
+        self.assertIsNone(src.read())
+        self.assertEqual(seen, [])                  # it didn't ask during the backoff
 
 
 if __name__ == "__main__":

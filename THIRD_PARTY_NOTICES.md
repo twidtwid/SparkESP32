@@ -45,6 +45,12 @@ LVGL generates from two typefaces:
 | [Montserrat](https://github.com/JulietaUla/Montserrat) Medium, by Julieta Ulanovsky and the Montserrat Project Authors | [SIL Open Font License 1.1](https://openfontlicense.org) |
 | [Font Awesome 5 Free](https://fontawesome.com) symbol glyphs, by Fonticons, Inc. | [SIL Open Font License 1.1](https://openfontlicense.org) (fonts) |
 
+## Works with
+
+| Project | License | How |
+|---|---|---|
+| [Sparkline](https://github.com/sfxnz/sparkline) (Sufyan) | MIT | When its agent runs on the Spark, SparkESP32's agent reads its `GET /api/v1/snapshot` over HTTP. No Sparkline code is included or distributed |
+
 ## Used by the host tools
 
 | Project | Version | License | Used by |

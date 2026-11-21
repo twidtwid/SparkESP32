@@ -19,6 +19,7 @@ OPT=/opt/sparkesp32
 VENV="$OPT/venv"
 UNIT=/etc/systemd/system/sparkesp32.service
 RULES=/etc/udev/rules.d/99-sparkesp32.rules
+SL_ENV=/etc/sparkesp32/sparkline.env      # Sparkline's agent URL + token, when we read from it
 HTTP_PORT=8787
 
 boards() { (cd "$HERE/firmware/boards" 2>/dev/null && printf '%s ' */ | tr -d /); }
@@ -46,6 +47,7 @@ SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
                            its chip); one of: $(boards)
   --firmware DIR           flash a firmware bundle from DIR (the images + flash_args)
   --no-flash               never flash, even if the board needs it
+  --no-sparkline           sample this host ourselves even if a Sparkline agent runs here
   --reflash                flash even if the board already runs $VERSION
   --port DEV               the display's serial port (default: autodetect)
   --lan CIDR               subnet allowed to reach :$HTTP_PORT through ufw (default: this host's)
@@ -63,7 +65,7 @@ trap '[ "$BASH_SUBSHELL" -gt 0 ] || die "unexpected failure at line $LINENO: $BA
 ARGS=""; [ $# -eq 0 ] || printf -v ARGS ' %q' "$@"    # for the "run with sudo" hint
 
 NAME="" NAME_SET="" HOST="" SSIDS="" PW_ENV="" OPEN_WIFI="" CLEAR_WIFI="" NO_WIFI="" ROTATION=""
-FW_DIR="" NO_FLASH="" REFLASH="" PORT="" LAN_CIDR="" YES="" UNINSTALL="" BOARD=""
+FW_DIR="" NO_FLASH="" REFLASH="" PORT="" LAN_CIDR="" YES="" UNINSTALL="" BOARD="" NO_SPARKLINE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --name) NAME="${2?--name needs a value (\"\" for the hostname)}"; NAME_SET=1; shift ;;
@@ -77,6 +79,7 @@ while [ $# -gt 0 ]; do
         --board) BOARD="${2?--board needs a board id}"; shift ;;
         --firmware) FW_DIR="${2?--firmware needs a directory}"; shift ;;
         --no-flash) NO_FLASH=1 ;;
+        --no-sparkline) NO_SPARKLINE=1 ;;
         --reflash) REFLASH=1 ;;
         --port) PORT="${2?--port needs a device}"; shift ;;
         --lan) LAN_CIDR="${2?--lan needs a CIDR}"; shift ;;
@@ -107,6 +110,7 @@ if [ -n "$UNINSTALL" ]; then
     say "uninstalling SparkESP32"
     systemctl disable --now sparkesp32.service 2>/dev/null || true
     rm -f "$UNIT" "$RULES"
+    rm -rf "$(dirname "$SL_ENV")"
     ufw_delete_ours
     rm -rf "$OPT"
     systemctl daemon-reload
@@ -294,6 +298,39 @@ if [ -n "$PORT" ] && [ -n "$DEV_STATUS" ]; then
         die "display setup failed (see above); nothing else was changed on the board"
 fi
 
+# ------------------------------------------------------------------ Sparkline
+
+# A Sparkline agent (github.com/sfxnz/sparkline) already samples this Spark once a second. When
+# one runs here, our agent reads its /api/v1/snapshot instead of running nvidia-smi a second
+# time, so the display and the Sparkline dashboard show the same numbers. Its token goes in a
+# root-only file that systemd hands to our service; it never goes to the display.
+sparkline_config() {     # prints "URL TOKEN" for a Sparkline agent running here, or nothing
+    systemctl is-active --quiet sparkline-agent.service 2>/dev/null || return 0
+    [ -r /etc/sparkline/agent.toml ] || return 0
+    "$PY" - <<'EOF' 2>/dev/null || true
+import subprocess, tomllib
+c = tomllib.load(open("/etc/sparkline/agent.toml", "rb"))
+token, bind, port = c.get("token", ""), c.get("bind", "auto"), c.get("port", 9750)
+if bind == "auto":       # Sparkline's rule: the IPv4 address of the default-route interface
+    out = subprocess.run(["ip", "-4", "route", "get", "1.1.1.1"], capture_output=True, text=True).stdout.split()
+    bind = out[out.index("src") + 1] if "src" in out else ""
+if ":" in bind:
+    bind = f"[{bind}]"
+if token and bind:
+    print(f"http://{bind}:{port} {token}")
+EOF
+}
+
+SL_URL="" SL_TOKEN=""
+[ -n "$NO_SPARKLINE" ] || read -r SL_URL SL_TOKEN <<<"$(sparkline_config)" || true
+if [ -n "$SL_URL" ]; then
+    say "Sparkline runs here ($SL_URL): the display gets its numbers (--no-sparkline to sample ourselves)"
+    install -d -m 0755 "$(dirname "$SL_ENV")"
+    (umask 077 && printf 'SPARKLINE_URL=%s\nSPARKLINE_TOKEN=%s\n' "$SL_URL" "$SL_TOKEN" > "$SL_ENV")
+else
+    rm -f "$SL_ENV"
+fi
+
 # ------------------------------------------------------------------ service
 
 say "udev: keep ModemManager off the display"
@@ -355,5 +392,14 @@ case "${link%% *}" in
     *)         echo "    display:  not connected"
                echo "    plug the display into this Spark's USB-C, or put it on Wi-Fi (README)" ;;
 esac
+if [ -n "$SL_URL" ]; then
+    src="$(curl -fsS -m2 "http://127.0.0.1:$HTTP_PORT/healthz" 2>/dev/null | "$PY" -c \
+        'import json, sys; d = json.load(sys.stdin); print(d.get("source", "?"), (d.get("sparkline") or {}).get("error") or "")' \
+        2>/dev/null)" || src="?"
+    case "$src" in
+        sparkline*) echo "    readings: from Sparkline at $SL_URL" ;;
+        *) echo "    readings: sampled here; Sparkline didn't answer (${src#* }), retried every 30 s" ;;
+    esac
+fi
 echo "    logs:     journalctl -u sparkesp32 -f"
 echo "    change:   sudo $0 --name ... | --ssids ... | --host ...   (re-run any time)"

@@ -1,0 +1,187 @@
+{
+ "cpu": {
+  "eff_util": 0.2,
+  "freq_mhz": [
+   2481.679,
+   2662.664,
+   2618.789,
+   2602.335,
+   2722.992,
+   null,
+   3534.375,
+   3751.464,
+   3896.191,
+   3892.382,
+   2485.742,
+   null,
+   2709.179,
+   2695.214,
+   2508.085,
+   3640.025,
+   null,
+   3620.601,
+   3900.304,
+   3898.425
+  ],
+  "load1": 0.57,
+  "load15": 0.23,
+  "load5": 0.33,
+  "per_core": [
+   0.0,
+   0.0,
+   0.0,
+   1.0,
+   1.0,
+   1.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   1.0,
+   0.0,
+   0.0
+  ],
+  "perf_util": 0.2,
+  "psi_some": 0.0,
+  "util": 0.2
+ },
+ "cpu_temp_c": null,
+ "disk": [
+  {
+   "busy_pct": 0.30075500121702015,
+   "name": "nvme0n1",
+   "read_bps": 0.0,
+   "read_iops": 0.0,
+   "write_bps": 4106.308283283049,
+   "write_iops": 1.0025166707234006
+  }
+ ],
+ "errors": {},
+ "fs": [
+  {
+   "device": "/dev/nvme0n1p2",
+   "free": 3221715341312,
+   "key": "root",
+   "mount": "/",
+   "total": 4031871553536,
+   "used": 605315358720
+  }
+ ],
+ "gpu": [
+  {
+   "energy_j": 826826.146,
+   "gr_mhz": 2405.0,
+   "index": 0,
+   "power_capped_pct": 0.0,
+   "power_w": 10.683,
+   "pstate": 0,
+   "shared_used": 92456632320,
+   "sm_mhz": 2405.0,
+   "temp_c": 36.0,
+   "thermal_capped_pct": 0.0,
+   "throttle_mask": 0,
+   "util": 0.0,
+   "video_mhz": 2060.0,
+   "vram_used": null
+  }
+ ],
+ "interval_ms": 1000,
+ "mem": {
+  "anon": 2911215616,
+  "available": 31014940672,
+  "cache": 26062393344,
+  "free": 4486815744,
+  "gpu": 92456632320,
+  "kernel": 3069894656,
+  "other": 1030049792,
+  "psi_full": 0.0,
+  "psi_some": 0.0,
+  "shmem": 178335744,
+  "swap_total": 17179865088,
+  "swap_used": 4458618880,
+  "total": 130661068800,
+  "used": 99646128128
+ },
+ "net": [
+  {
+   "drops": 0.0,
+   "errors": 0.0,
+   "name": "wlP9s9",
+   "rdma_rate": null,
+   "rdma_state": null,
+   "rx_bps": 24770.14534684306,
+   "speed_mbps": null,
+   "tx_bps": 7823.6285529692095,
+   "up": true
+  },
+  {
+   "drops": 0.0,
+   "errors": 0.0,
+   "name": "enP7s7",
+   "rdma_rate": null,
+   "rdma_state": null,
+   "rx_bps": 0.0,
+   "speed_mbps": null,
+   "tx_bps": 0.0,
+   "up": false
+  }
+ ],
+ "node_id": "spark-demo",
+ "procs": null,
+ "procs_ts": 1795286694.8876028,
+ "seq": 74457,
+ "temps": [
+  {
+   "c": 38.8,
+   "id": "acpitz_0.1"
+  },
+  {
+   "c": 35.5,
+   "id": "acpitz_1.1"
+  },
+  {
+   "c": 35.1,
+   "id": "acpitz_2.1"
+  },
+  {
+   "c": 35.8,
+   "id": "acpitz_3.1"
+  },
+  {
+   "c": 34.8,
+   "id": "acpitz_4.1"
+  },
+  {
+   "c": 38.8,
+   "id": "acpitz_5.1"
+  },
+  {
+   "c": 36.7,
+   "id": "acpitz_6.1"
+  },
+  {
+   "c": 40.0,
+   "id": "mt7925_phy0.1"
+  },
+  {
+   "c": 33.85,
+   "id": "nvme.composite"
+  },
+  {
+   "c": 33.85,
+   "id": "nvme.sensor_1"
+  },
+  {
+   "c": 33.85,
+   "id": "nvme.sensor_2"
+  }
+ ],
+ "ts": 1795286696.8797336
+}

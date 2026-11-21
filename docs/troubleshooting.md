@@ -101,8 +101,9 @@ or `--host <ip>`.
 
 ## GPU, temperature or power show `--`
 
-The agent couldn't read them from `nvidia-smi`. Check `/healthz` → `"gpu_source"`
-(and `"gpu_error"` for the details):
+The agent couldn't read them. If `/healthz` → `"source"` is `"sparkline"`, they come from
+Sparkline (see below). Otherwise they come from `nvidia-smi`: check `"gpu_source"` (and
+`"gpu_error"` for the details):
 
 - `unavailable`: the NVIDIA driver/tools aren't installed or aren't on `PATH` for the
   service.
@@ -110,8 +111,22 @@ The agent couldn't read them from `nvidia-smi`. Check `/healthz` → `"gpu_sourc
   The agent restarts it with backoff.
 - `stalled`: it stopped printing without exiting (a hung driver call). The agent kills
   and restarts it; if this keeps happening, the driver itself is stuck.
+- `idle`: `nvidia-smi` isn't running because the readings come from Sparkline.
 
 CPU, memory and the core heatmap don't depend on `nvidia-smi`.
+
+## Readings from Sparkline
+
+On a Spark that runs [Sparkline](https://github.com/sfxnz/sparkline), the installer sets
+the agent to read Sparkline's samples. `/healthz` shows which source is live:
+
+- `"source": "sparkline"`: the numbers come from Sparkline's agent.
+- `"source": "own"` with `"sparkline": {"state": "error", "error": ...}`: Sparkline
+  didn't answer, so the agent samples by itself and asks Sparkline again every 30 s.
+  `token rejected` means Sparkline's agent token changed: re-run `sudo ./install.sh`.
+  A refused connection or a timeout means Sparkline's agent is down or moved.
+
+To sample on the Spark without Sparkline, run `sudo ./install.sh --no-sparkline`.
 
 ## The image is sideways
 

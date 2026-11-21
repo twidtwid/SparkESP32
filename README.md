@@ -176,8 +176,15 @@ DGX Spark                                         ESP32-C6 AMOLED
 
 Both transports carry the same one-line text format
 (`stat 6 91 46328 130661 60 410 1,1,0,... spark-1a2b`), described in
-[docs/protocol.md](docs/protocol.md). The agent is ~300 lines of stdlib Python plus pyserial.
-The firmware is ESP-IDF 5.5 + LVGL 9.
+[docs/protocol.md](docs/protocol.md). The agent is a few hundred lines of stdlib Python plus
+pyserial. The firmware is ESP-IDF 5.5 + LVGL 9.
+
+**Already running [Sparkline](https://github.com/sfxnz/sparkline)?** The installer notices
+its agent and has ours read Sparkline's samples instead of running `nvidia-smi` a second
+time, so the display and your Sparkline dashboard always show the same numbers. Sparkline's
+token stays on the Spark, readable only by root and the service; it never goes to the
+display. If Sparkline stops answering, the agent samples by itself until it's back.
+`--no-sparkline` turns this off.
 
 ## Troubleshooting
 
@@ -217,6 +224,8 @@ SparkESP32 is a small layer on top of a lot of other people's work. Thank you to
 - [LVGL](https://github.com/lvgl/lvgl), which draws every screen, with the
   [Montserrat](https://github.com/JulietaUla/Montserrat) typeface and
   [Font Awesome](https://fontawesome.com) glyphs.
+- [Sparkline](https://github.com/sfxnz/sparkline) by Sufyan, whose agent SparkESP32 reads
+  from on Sparks that run it.
 - [XPowersLib](https://github.com/lewisxhe/XPowersLib) by Lewis He, which drives the C6
   board's power chip.
 - [pySerial](https://github.com/pyserial/pyserial), which the agent and every host tool

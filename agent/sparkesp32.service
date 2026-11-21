@@ -10,11 +10,13 @@ Type=simple
 User=@RUN_USER@
 # serial access to the display without adding the user to dialout
 SupplementaryGroups=dialout
+# written by install.sh only when a Sparkline agent runs here: its URL and token
+EnvironmentFile=-/etc/sparkesp32/sparkline.env
 ExecStart=/opt/sparkesp32/venv/bin/python /opt/sparkesp32/sparkesp32_agent.py
 Restart=always
 RestartSec=3
 
-# the agent only reads /proc, runs nvidia-smi, opens one tty and one socket
+# the agent only reads /proc, runs nvidia-smi (or asks Sparkline), opens one tty and one socket
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only

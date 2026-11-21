@@ -53,7 +53,9 @@ Useful flags: `--host <ip>` when mDNS (`<hostname>.local`) doesn't resolve on th
 `--port /dev/ttyACMn` if several Espressif boards are attached; `--board <id>` if the
 installer can't tell which supported board it is (it asks the firmware, then the chip);
 `--no-flash` to leave the firmware alone; `--lan <cidr>` to override the subnet ufw
-allows. `./install.sh --help` lists everything.
+allows; `--no-sparkline` to sample even when a Sparkline agent runs there (by default the
+agent reads Sparkline's samples; its token stays in a root-only file and never goes to the
+display). `./install.sh --help` lists everything.
 
 ### Definition of done
 
@@ -79,7 +81,8 @@ curl -fsS localhost:8787/healthz | python3 -m json.tool   # "display": "connecte
 install.sh                 Spark-side installer (flash, provision, service, firewall, verify)
 VERSION                    the one version: firmware (CMake reads it), agent, installer
 agent/
-  sparkesp32_agent.py      sampler + USB push + HTTP /stat,/healthz (stdlib + pyserial)
+  sparkesp32_agent.py      sampler (or a Sparkline agent's readings) + USB push + HTTP
+                           /stat,/healthz (stdlib + pyserial)
   sparkesp32.service       systemd unit template (@RUN_USER@)
   99-sparkesp32.rules      udev: ModemManager ignore for 303a:1001
   requirements.txt         pinned pyserial + esptool for /opt/sparkesp32/venv
