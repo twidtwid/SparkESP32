@@ -1,6 +1,6 @@
 # SparkESP32
 
-**A status display and power light for the NVIDIA DGX Spark, on a $30 ESP32 AMOLED board.**
+**A status display and power light for the NVIDIA DGX Spark, on an ESP32 AMOLED board that costs under $40.**
 
 The DGX Spark has no power LED and nothing on the outside that tells you what it's doing.
 SparkESP32 puts a 2.16" 480×480 AMOLED next to it that shows CPU, GPU and unified-memory
