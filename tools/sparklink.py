@@ -25,6 +25,7 @@ BRIDGE_IDS = {(0x1A86, 0x7523),              # WCH CH340
               (0x1A86, 0x55D4),              # WCH CH9102
               (0x10C4, 0xEA60)}              # Silicon Labs CP210x
 BAUD = 115200       # native USB ignores it; a board behind a bridge runs its console at this rate
+LEGACY_BAUD = 921600  # 1.3.0 ran bridge boards at this: asked second, so they can still be found
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 ESP_LOG = re.compile(r"[EWIDV] \(\d+\) ")   # "I (4378) tag: ...": the board logging, never a reply
 PROMPT = "spark>"
@@ -42,8 +43,9 @@ class LinkError(RuntimeError):
 
 
 def find_ports():
-    """Every attached port a display could be on: native USB first, then USB-UART
-    bridges; on macOS the cu.* device of each, not its tty.* twin."""
+    """The ports a display could be on: the chip's own USB if any is attached, else the
+    USB-UART bridges, so an unrelated CH340/CP210x gadget never makes a native display
+    ambiguous. On macOS the cu.* device of each, not its tty.* twin."""
     native, bridge = [], []
     for p in serial.tools.list_ports.comports():
         if "/tty." in p.device:
@@ -52,7 +54,7 @@ def find_ports():
             native.append(p.device)
         elif (p.vid, p.pid) in BRIDGE_IDS:
             bridge.append(p.device)
-    return sorted(native) + sorted(bridge)
+    return sorted(native) or sorted(bridge)
 
 
 def is_bridge(port):
@@ -73,10 +75,10 @@ def clean_lines(raw):
 
 
 class Link:
-    def __init__(self, port):
+    def __init__(self, port, baud=BAUD):
         self.port = port
         try:
-            self.ser = serial.Serial(port, BAUD, timeout=0.2, write_timeout=2)
+            self.ser = serial.Serial(port, baud, timeout=0.2, write_timeout=2)
         except serial.SerialException as e:
             raise LinkError(f"can't open {port}: {e}") from None
         time.sleep(0.2)
@@ -159,8 +161,9 @@ class Link:
                                        "is it running SparkESP32 firmware?")
 
 
-def connect(port=None):
-    """Open the display (explicit port, or the single autodetected one) and handshake."""
+def connect(port=None, timeout=10.0):
+    """Open the display (explicit port, or the single autodetected one) and handshake,
+    asking for up to `timeout` seconds at each rate."""
     ports = [port] if port else find_ports()
     if not ports:
         raise LinkError("no SparkESP32 display found on USB (Espressif 303a:1001, or a CH340/CP210x "
@@ -168,13 +171,17 @@ def connect(port=None):
     if len(ports) > 1:
         raise LinkError(f"several USB serial devices that could be a display ({', '.join(ports)}); "
                         "pick one with --port")
-    link = Link(ports[0])
-    try:
-        link.handshake()
-    except Exception:
-        link.close()
-        raise
-    return link
+    # a bridge board from 1.3.0 still runs its console at 921600: ask at that rate second
+    rates = [BAUD, LEGACY_BAUD] if is_bridge(ports[0]) else [BAUD]
+    for i, baud in enumerate(rates):
+        link = Link(ports[0], baud)
+        try:
+            link.handshake(timeout)
+            return link
+        except Exception:
+            link.close()
+            if i == len(rates) - 1:
+                raise
 
 
 def console_quote(s):

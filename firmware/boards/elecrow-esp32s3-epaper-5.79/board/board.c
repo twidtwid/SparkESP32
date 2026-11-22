@@ -47,6 +47,7 @@ static const char *TAG = "board";
 #define HALF_BYTES    (HALF_ROW * EPD_H)
 
 #define RESET_TIMEOUT_MS    1000
+#define START_TIMEOUT_MS    100              // BUSY rises within this of a refresh command
 #define FULL_TIMEOUT_MS     6000             // typical: 2.2 s
 #define PARTIAL_TIMEOUT_MS  3000             // typical: 0.45 s
 
@@ -78,6 +79,22 @@ static esp_err_t wait_idle(int timeout_ms)
         vTaskDelay(pdMS_TO_TICKS(5));
     }
     return ESP_OK;
+}
+
+// A refresh must be seen to start: BUSY rises within a moment of the activation
+// command. If it never does, the command was lost and the glass didn't change, so say
+// so rather than let the caller record a frame the panel isn't showing.
+static esp_err_t wait_refresh(int timeout_ms)
+{
+    int64_t start_by = esp_timer_get_time() + START_TIMEOUT_MS * 1000;
+    while (!gpio_get_level(PIN_EPD_BUSY)) {
+        if (esp_timer_get_time() > start_by) {
+            ESP_LOGE(TAG, "e-paper refresh never started (BUSY stayed low)");
+            return ESP_ERR_INVALID_STATE;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    return wait_idle(timeout_ms);
 }
 
 static bool IRAM_ATTR ram_sent(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *e, void *ctx)
@@ -127,7 +144,7 @@ esp_err_t epd_show(const uint8_t *frame, const uint8_t *prev, epd_mode_t mode)
         CMD(0x1A, 0x64, 0x00);               // temperature 100 C: the OTP's fast full waveform
         CMD(0x22, 0xD7);                     // load that waveform, display, power the analog side down
         CMD0(0x20);
-        err = wait_idle(FULL_TIMEOUT_MS);
+        err = wait_refresh(FULL_TIMEOUT_MS);
     } else {
         ESP_RETURN_ON_ERROR(write_ram(0x24, frame), TAG, "new image");
         ESP_RETURN_ON_ERROR(write_ram(0x26, prev), TAG, "old image");
@@ -135,7 +152,7 @@ esp_err_t epd_show(const uint8_t *frame, const uint8_t *prev, epd_mode_t mode)
         CMD(0x21, 0x00, 0x10);               // compare new with old: unchanged pixels aren't driven; cascade
         CMD(0x22, 0xFF);                     // sensor temperature, black/white waveform, display, power down
         CMD0(0x20);
-        err = wait_idle(PARTIAL_TIMEOUT_MS);
+        err = wait_refresh(PARTIAL_TIMEOUT_MS);
     }
     ESP_LOGD(TAG, "%s refresh: %d ms", mode == EPD_FULL ? "full" : "partial",
              (int)((esp_timer_get_time() - t0) / 1000));

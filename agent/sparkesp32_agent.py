@@ -58,6 +58,7 @@ BRIDGE_IDS = {(0x1A86, 0x7523),       # WCH CH340
               (0x1A86, 0x55D4),       # WCH CH9102
               (0x10C4, 0xEA60)}       # Silicon Labs CP210x
 BAUD = 115200                         # native USB ignores it; a board behind a bridge runs its console at it
+LEGACY_BAUD = 921600                  # 1.3.0 ran bridge boards at this: asked second, so they still connect
 HANDSHAKE = b"fw=sparkesp32"
 REJECT_S = 300.0                      # a native port that fails the handshake is skipped this long;
                                       # a bridge, until it's replugged: it may be some other gadget
@@ -448,6 +449,21 @@ def make_handler(sampler):
 
 # ---------------------------------------------------------------- serial
 
+def node_id(path):
+    """Which device node `path` is now: a replug makes a new one, even at the same path."""
+    try:
+        st = os.stat(path)
+        return (st.st_ino, st.st_ctime_ns)
+    except OSError:
+        return None
+
+
+def is_bridge(port):
+    """True if `port` is a USB-UART bridge (anything there may be some other gadget)."""
+    return any(p.device == port and (p.vid, p.pid) in BRIDGE_IDS
+               for p in serial.tools.list_ports.comports())
+
+
 def candidate_ports():
     """[(device, is_bridge)]: native USB ports first, then USB-UART bridges."""
     found = [(p.device, (p.vid, p.pid) in BRIDGE_IDS) for p in serial.tools.list_ports.comports()
@@ -489,22 +505,27 @@ def serial_loop(sampler, explicit_port, stop):
       handshaking  asking `status` on "port", for up to HANDSHAKE_S
       streaming    pushing stat lines to "port" ("answered_in_s": handshake time,
                    "proto": the protocol its firmware reads)
-      rejected     "port" didn't answer as a SparkESP32: skipped until it's
-                   replugged or REJECT_S passes ("retry_in_s"; null for a
-                   USB-UART bridge, which waits for the replug)
+      rejected     "port" didn't answer as a SparkESP32, or (a USB-UART bridge)
+                   another program has it open: skipped until it's replugged
+                   or REJECT_S passes ("retry_in_s"; null for a bridge, which
+                   waits for the replug)
+
+    Ports are opened exclusively, so the agent never writes into a port another
+    program holds (a Zigbee stick on a CP210x, say).
     """
+    # rejected: port -> (until, the device node it was), so a replug clears it however fast
     ser, last_at, rejected, proto = None, 0.0, {}, 1
     while not stop.is_set():
         try:
             if ser is None:
                 now = time.monotonic()
-                # unplugging forgets a rejection, so a replug is always retried at once
-                rejected = {p: t for p, t in rejected.items() if t > now and os.path.exists(p)}
-                ports = [(explicit_port, False)] if explicit_port else candidate_ports()
+                # a replug (a new device node) forgets a rejection, so it's always retried at once
+                rejected = {p: (t, n) for p, (t, n) in rejected.items() if t > now and node_id(p) == n}
+                ports = [(explicit_port, is_bridge(explicit_port))] if explicit_port else candidate_ports()
                 ports = [(p, b) for p, b in ports if p not in rejected]
                 if not ports:
                     if rejected:
-                        port, until = min(rejected.items(), key=lambda kv: kv[1])
+                        port, (until, _) = min(rejected.items(), key=lambda kv: kv[1][0])
                         sampler.display = {"state": "rejected", "port": port,
                                            "retry_in_s": None if until == math.inf else round(until - now)}
                     else:
@@ -513,9 +534,24 @@ def serial_loop(sampler, explicit_port, stop):
                     continue
                 port, bridge = ports[0]
                 sampler.display = {"state": "handshaking", "port": port}
-                ser = serial.Serial(port, BAUD, timeout=0.2, write_timeout=1)
+                try:
+                    ser = serial.Serial(port, BAUD, timeout=0.2, write_timeout=1, exclusive=True)
+                except (OSError, serial.SerialException) as e:
+                    if not bridge:
+                        raise
+                    # busy (another program holds it) or unopenable: not ours to poke
+                    log.warning("can't open %s (a USB-UART bridge): %s; leaving it alone until it's "
+                                "replugged", port, e)
+                    rejected[port] = (math.inf, node_id(port))
+                    continue
                 t0 = time.monotonic()
                 proto = handshake(ser, HANDSHAKE_S)
+                if not proto and bridge:    # a board from 1.3.0 still runs its console at 921600
+                    ser.baudrate = LEGACY_BAUD
+                    proto = handshake(ser, HANDSHAKE_S)
+                    if proto:
+                        log.warning("%s answers at %d baud: its firmware is older than 1.4.0; update it "
+                                    "with install.sh", port, LEGACY_BAUD)
                 if not proto:
                     if bridge:      # a USB-UART bridge may be any gadget: ask it once per plug-in
                         log.warning("%s (a USB-UART bridge) didn't answer as a SparkESP32; leaving it "
@@ -524,7 +560,8 @@ def serial_loop(sampler, explicit_port, stop):
                         log.warning("%s is an Espressif USB device but not a SparkESP32; ignoring it "
                                     "for %d minutes or until it's replugged", port, REJECT_S // 60)
                     ser.close()
-                    ser, rejected[port] = None, math.inf if bridge else time.monotonic() + REJECT_S
+                    ser = None
+                    rejected[port] = (math.inf if bridge else time.monotonic() + REJECT_S, node_id(port))
                     continue
                 took = round(time.monotonic() - t0, 1)
                 log.info("display connected on %s (answered in %.1fs, protocol v%d)", port, took, proto)

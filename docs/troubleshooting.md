@@ -47,6 +47,9 @@ Nothing has arrived over USB yet.
     firmware: re-run `sudo ./install.sh` to flash it.
   - `streaming`: all good; `"answered_in_s"` is how long the board took to answer.
 - ModemManager probing the port garbles the console. The installer's udev rule stops that.
+  It goes by USB ID, so ModemManager also leaves alone every other CH340, CH343, CH9102 and
+  CP210x adapter on the Spark. If a modem of yours sits behind one of those chips, delete
+  `/etc/udev/rules.d/99-sparkesp32.rules`'s line for it and run `sudo udevadm control --reload`.
   Check it's present: `cat /etc/udev/rules.d/99-sparkesp32.rules`.
 
 ## OFFLINE
@@ -211,15 +214,17 @@ The Elecrow e-papers (5.79" and 4.2") behave differently from the lit screens, b
   green sticker on the back, an SSD1683 controller), which this firmware doesn't drive.
   Restore its factory flash (`esptool write_flash 0x0 <backup>`).
 - `/healthz` → `"display"` → `"state": "rejected"` with `"retry_in_s": null`: the agent
-  asked a USB-UART bridge whether it's a SparkESP32 and got no answer, so it leaves that
-  device alone until it's replugged. Unplug and replug the board, or check it runs
+  asked a USB-UART bridge whether it's a SparkESP32 and got no answer (at 115200 or at
+  1.3.0's 921600), or another program has that port open, so it leaves that device alone
+  until it's replugged. Unplug and replug the board, or check it runs
   SparkESP32 (`devctl.py status`).
 
 ## Flashing fails
 
 - Hold the board's **BOOT** button while plugging it in (forces the ROM bootloader), then
   re-run `sudo ./install.sh --reflash`.
-- `several USB serial devices that could be the display`: pick one with `--port`
+- `several USB serial devices that could be the display`: two displays (or a display and
+  another Espressif board) are attached. Pick one with `--port`
   (`/dev/ttyACMn`, or `/dev/ttyUSBn` for a board behind a USB-UART bridge).
 - `... is a USB-UART bridge that doesn't answer as a SparkESP32: leaving it alone`: a
   CH340/CP210x device is plugged in but isn't running SparkESP32. If it's a new display

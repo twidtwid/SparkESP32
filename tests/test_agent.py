@@ -413,6 +413,19 @@ class BootingBoard:
         pass
 
 
+class LegacyRateBoard(BootingBoard):
+    """A 1.3.0 bridge board: its console runs at 921600, so it only answers at that rate."""
+
+    def __init__(self, rate):
+        super().__init__(deaf=0, fw=b"fw=sparkesp32 version=1.3.0 idf=v5.5.6 board=x proto=2")
+        self.rate, self.baudrate = rate, None
+
+    def write(self, data):
+        self.sent += data
+        if self.baudrate == self.rate:
+            self.out += b"STATUS-BEGIN\r\n" + self.fw + b"\r\nSTATUS-END\r\n"
+
+
 class AgentHandshakeTest(unittest.TestCase):
     def test_asks_again_while_the_board_boots(self):
         board = BootingBoard(deaf=3)
@@ -506,11 +519,73 @@ class SerialLoopTest(unittest.TestCase):
         board = BootingBoard(deaf=0)
 
         def open_port(*a, **k):
-            opened.append(a[1] if len(a) > 1 else k.get("baudrate"))
+            opened.append((a[1] if len(a) > 1 else k.get("baudrate"), k.get("exclusive")))
             return board
         d, port = self.run_loop(open_port, streaming_to(board), bridge=True)
         self.assertEqual((d["state"], d["port"]), ("streaming", port))
-        self.assertEqual(opened, [agent.BAUD])          # the bridge's UART rate (native USB ignores it)
+        # the bridge's UART rate (native USB ignores it), and never a port another program holds
+        self.assertEqual(opened, [(agent.BAUD, True)])
+
+    def test_a_bridge_board_from_1_3_0_is_found_at_its_old_rate(self):
+        board = LegacyRateBoard(agent.LEGACY_BAUD)
+
+        def open_port(*a, **k):
+            board.baudrate = a[1] if len(a) > 1 else k.get("baudrate")
+            return board
+        d, _ = self.run_loop(open_port, streaming_to(board), timeout=4.0, bridge=True)
+        self.assertEqual((d["state"], d["proto"]), ("streaming", 2))
+        self.assertEqual(board.baudrate, agent.LEGACY_BAUD)
+
+    def test_a_native_port_isnt_asked_at_the_old_rate(self):
+        board = LegacyRateBoard(agent.LEGACY_BAUD)
+
+        def open_port(*a, **k):
+            board.baudrate = a[1] if len(a) > 1 else k.get("baudrate")
+            return board
+        d, _ = self.run_loop(open_port, lambda d: d["state"] == "rejected")
+        self.assertEqual(d["state"], "rejected")
+        self.assertEqual(board.baudrate, agent.BAUD)
+
+    def test_a_busy_bridge_is_left_alone(self):
+        def busy(*a, **k):
+            raise agent.serial.SerialException("Could not exclusively lock port")
+        d, port = self.run_loop(busy, lambda d: d["state"] == "rejected", bridge=True)
+        self.assertEqual((d["state"], d["port"], d["retry_in_s"]), ("rejected", port, None))
+
+    def test_a_fast_replug_at_the_same_path_is_retried(self):
+        # the rejected device is replaced at the same path between two polls: a new device node
+        with tempfile.TemporaryDirectory() as tmp:
+            dev = os.path.join(tmp, "ttyUSB0")
+            open(dev, "w").close()
+            boards = [BootingBoard(deaf=10**6), BootingBoard(deaf=0)]   # a gadget, then a display
+            opened = []
+
+            def open_port(*a, **k):
+                opened.append(boards[len(opened)])
+                return opened[-1]
+            saved = agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S
+            agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S = (
+                lambda: [(dev, True)]), open_port, 0.3
+            sampler = types.SimpleNamespace(display={"state": "searching"},
+                                            latest=lambda: ("stat 1 2 3 4 5 6 7 h", time.monotonic(), {}))
+            stop = threading.Event()
+            loop = threading.Thread(target=agent.serial_loop, args=(sampler, None, stop), daemon=True)
+            loop.start()
+            try:
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and sampler.display["state"] != "rejected":
+                    time.sleep(0.01)
+                self.assertEqual(sampler.display["state"], "rejected")
+                os.unlink(dev)                        # unplug and replug inside one poll
+                open(dev, "w").close()
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and sampler.display["state"] != "streaming":
+                    time.sleep(0.01)
+                self.assertEqual(sampler.display["state"], "streaming")
+            finally:
+                stop.set()
+                loop.join(3)
+                agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S = saved
 
     def test_a_port_that_wont_open_says_why(self):
         def denied(*a, **k):
@@ -542,16 +617,49 @@ class PortDiscoveryTest(unittest.TestCase):
             ("/dev/ttyACM0", False), ("/dev/ttyACM1", False),
             ("/dev/cu.usbserial-10", True), ("/dev/tty.usbserial-10", True), ("/dev/ttyUSB0", True)])
 
-    def test_tools_skip_macos_tty_twins(self):
-        self.assertEqual(sparklink.find_ports(),
-                         ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/cu.usbserial-10", "/dev/ttyUSB0"])
+    def test_tools_take_native_ports_when_there_are_any(self):
+        # an unrelated CH340/CP210x gadget must not make a native display ambiguous
+        self.assertEqual(sparklink.find_ports(), ["/dev/ttyACM0", "/dev/ttyACM1"])
+
+    def test_tools_fall_back_to_bridges_skipping_macos_tty_twins(self):
+        bridges_only = [p for p in self.PORTS if (p.vid, p.pid) not in sparklink.NATIVE_IDS]
+        agent.serial.tools.list_ports.comports = lambda: bridges_only
+        self.assertEqual(sparklink.find_ports(), ["/dev/cu.usbserial-10", "/dev/ttyUSB0"])
         self.assertTrue(sparklink.is_bridge("/dev/ttyUSB0"))
         self.assertFalse(sparklink.is_bridge("/dev/ttyACM0"))
         self.assertFalse(sparklink.is_bridge("/dev/ttyUSB1"))
 
+    def test_tools_reach_a_1_3_0_bridge_board_at_its_old_rate(self):
+        opened = []
+
+        class OldBoard(LegacyRateBoard):
+            def flush(self):
+                pass
+
+        def open_port(port, baud, **k):
+            board = OldBoard(sparklink.LEGACY_BAUD)
+            board.baudrate = baud
+            opened.append(baud)
+            return board
+        bridge_only = [types.SimpleNamespace(device="/dev/ttyUSB0", vid=0x1A86, pid=0x7523)]
+        agent.serial.tools.list_ports.comports = lambda: bridge_only
+        saved_serial, saved_time = sparklink.serial.Serial, sparklink.time.sleep
+        sparklink.serial.Serial, sparklink.time.sleep = open_port, lambda s: None
+        try:
+            link = sparklink.connect(timeout=0.5)
+            link.close()
+        finally:
+            sparklink.serial.Serial, sparklink.time.sleep = saved_serial, saved_time
+        self.assertEqual(opened, [sparklink.BAUD, sparklink.LEGACY_BAUD])
+
+    def test_an_explicit_port_is_classified_by_its_usb_id(self):
+        self.assertTrue(agent.is_bridge("/dev/ttyUSB0"))
+        self.assertFalse(agent.is_bridge("/dev/ttyACM0"))
+        self.assertFalse(agent.is_bridge("/dev/ttyUSB1"))       # FTDI: not a bridge we know
+
     def test_agent_and_tools_agree(self):
-        self.assertEqual((agent.NATIVE_IDS, agent.BRIDGE_IDS, agent.BAUD),
-                         (sparklink.NATIVE_IDS, sparklink.BRIDGE_IDS, sparklink.BAUD))
+        self.assertEqual((agent.NATIVE_IDS, agent.BRIDGE_IDS, agent.BAUD, agent.LEGACY_BAUD),
+                         (sparklink.NATIVE_IDS, sparklink.BRIDGE_IDS, sparklink.BAUD, sparklink.LEGACY_BAUD))
 
 
 def link_with(replies):

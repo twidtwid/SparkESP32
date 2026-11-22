@@ -87,6 +87,30 @@ class CheckBoards(unittest.TestCase):
         self.assertIn("no layout for 123x240", self.problems())
 
 
+class ReferenceLayout(unittest.TestCase):
+    """AGENTS.md: the C6's 480x480 layout must stay the same. Its values, as of 1.2.0."""
+
+    FROZEN = {
+        "w": "480", "h": "480", "margin": "22", "title_y": "14", "title_w": "280",
+        "title_font": "&lv_font_montserrat_28", "status_y": "22", "reason_y": "46", "dot": "14",
+        "ring_r": "58", "ring_w": "10", "ring_cx": "{92,240,388}", "ring_cy": "{150,150,150}",
+        "ring_val_dy": "-6", "ring_sub_dy": "16", "ring_title_dy": "23",
+        "ring_val_font": "&lv_font_montserrat_28", "ring_sub_font": "&lv_font_montserrat_14",
+        "gpu_mhz_fmt": '"%dMHz"', "cores_y": "250", "cells_y": "276", "cells_h": "30",
+        "cells_gap": "3", "tile_x": "{16,248}", "tile_y": "{322,322}", "tile_w": "216",
+        "tile_h": "142", "tile_radius": "14", "tile_pad": "16", "tile_label_y": "14",
+        "tile_value_y": "-12", "tile_label_font": "&lv_font_montserrat_16",
+        "tile_value_font": "&lv_font_montserrat_48",
+    }
+
+    def test_the_c6_layout_is_unchanged(self):
+        src = (ROOT / "firmware" / "main" / "ui.c").read_text()
+        block = re.search(r"#if BOARD_UI_W == 480 && BOARD_UI_H == 480.*?\n(.*?)\n#elif", src, re.S).group(1)
+        found = {k: re.sub(r"\s+", "", v) for k, v in
+                 re.findall(r"\.(\w+)\s*=\s*(\{[^}]*\}|\"[^\"]*\"|&?[\w-]+)", block)}
+        self.assertEqual(found, self.FROZEN)
+
+
 class NewBoard(unittest.TestCase):
     NEW = "acme-esp32c3-oled-1.3"
 

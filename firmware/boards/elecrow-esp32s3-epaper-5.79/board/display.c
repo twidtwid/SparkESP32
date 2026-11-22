@@ -38,7 +38,11 @@ static TaskHandle_t s_epd_task;
 static uint8_t *s_frame;                    // LVGL's side: what it rendered (under s_lock)
 static uint8_t *s_next;                     // the e-paper task's copy of it
 static uint8_t *s_glass;                    // what the panel shows
-static bool s_force_full = true;            // the panel shows whatever it showed before boot
+// Full-refresh requests (start-up, a rotation, a failed refresh) and the last one served,
+// under s_lock. A counter, not a flag: a request that arrives while a full refresh runs
+// stays pending when that refresh completes. 1 vs 0: the panel shows whatever it showed
+// before boot.
+static uint32_t s_full_req = 1, s_full_done;
 static display_rot_t s_rot = DISPLAY_ROT_CW;
 static lv_display_t *s_disp;
 
@@ -95,9 +99,11 @@ static void epd_task(void *arg)
         if (!pending && !due) continue;
 
         bool full;
+        uint32_t req;
         if (display_lock(-1) != ESP_OK) continue;
         memcpy(s_next, s_frame, EPD_FRAME_BYTES);
-        full = s_force_full || due;
+        req = s_full_req;
+        full = req != s_full_done || due;
         display_unlock();
 
         if (!full && memcmp(s_next, s_glass, EPD_FRAME_BYTES) == 0) {
@@ -111,14 +117,14 @@ static void epd_task(void *arg)
             ESP_LOGE(TAG, "%s refresh failed (%s); retrying", full ? "full" : "partial", esp_err_to_name(err));
             vTaskDelay(pdMS_TO_TICKS(RETRY_MS));
             epd_reinit();
-            if (display_lock(-1) == ESP_OK) { s_force_full = true; display_unlock(); }
+            if (display_lock(-1) == ESP_OK) { s_full_req++; display_unlock(); }
             continue;                        // `pending` stays set: try again at once
         }
         memcpy(s_glass, s_next, EPD_FRAME_BYTES);
         pending = false;
         if (full) {
             last_full_us = esp_timer_get_time();
-            if (display_lock(-1) == ESP_OK) { s_force_full = false; display_unlock(); }
+            if (display_lock(-1) == ESP_OK) { s_full_done = req; display_unlock(); }   // later requests stay
             ESP_LOGI(TAG, "full refresh: %d ms", (int)((last_full_us - t0) / 1000));
         }
         // A frame that arrived during the refresh left a notification: the loop takes it next.
@@ -149,7 +155,6 @@ esp_err_t display_start(display_rot_t rot)
     if (display_set_rotation(rot) != ESP_OK) s_rot = DISPLAY_ROT_CW;
     memset(s_frame, 0xFF, EPD_FRAME_BYTES);                              // white
     memset(s_glass, 0xFF, EPD_FRAME_BYTES);
-    s_force_full = true;
 
     // the e-paper task first: LVGL's first flush notifies it
     if (xTaskCreatePinnedToCore(epd_task, "epd", 4096, NULL, 4, &s_epd_task, 1) != pdPASS) return ESP_FAIL;
@@ -178,7 +183,7 @@ void display_unlock(void) { xSemaphoreGiveRecursive(s_lock); }
 esp_err_t display_set_rotation(display_rot_t rot)
 {
     if (rot == DISPLAY_ROT_NONE) return ESP_ERR_NOT_SUPPORTED;
-    if (rot != s_rot) s_force_full = true;   // every pixel moves: wipe rather than ghost
+    if (rot != s_rot) s_full_req++;          // every pixel moves: wipe rather than ghost
     s_rot = rot;
     if (s_disp)                              // the canvas changes shape: the caller lays the UI out again
         lv_display_set_resolution(s_disp, tall() ? EPD_H : EPD_W, tall() ? EPD_W : EPD_H);

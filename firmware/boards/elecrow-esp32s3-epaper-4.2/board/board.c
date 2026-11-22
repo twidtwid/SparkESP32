@@ -47,6 +47,7 @@ static const char *TAG = "board";
 #define EPD_PCLK_HZ   (10 * 1000 * 1000)
 
 #define REFRESH_TIMEOUT_MS  15000            // Elecrow's own limit for a full refresh
+#define START_TIMEOUT_MS    100              // BUSY falls within this of the refresh command
 
 static esp_lcd_panel_io_handle_t s_io;
 static SemaphoreHandle_t s_sent;             // given when a RAM write's DMA has finished
@@ -80,13 +81,23 @@ static const lut_group_t LUT_GC[5] = {
     {0x01, 0x94, 0x0A, 0x54, 0x00, 0x01, 0x01},
 };
 
-// Wait for BUSY to rise. Measured on the board: it's low from the refresh command until
-// the waveform ends (about 1.2 s for GC), then high. Elecrow's examples read it the other
-// way round, and their ESPHome driver leans on a 15 s timeout.
-static esp_err_t wait_idle(int timeout_ms)
+// Wait for a refresh to run. Measured on the board: BUSY falls at the refresh command and
+// stays low until the waveform ends (about 1.2 s for GC), then rises. Elecrow's examples
+// read it the other way round, and their ESPHome driver leans on a 15 s timeout. The
+// refresh must be seen to start (BUSY low): if it never does, the command was lost and
+// the glass didn't change, so say so rather than let the caller record a frame the panel
+// isn't showing.
+static esp_err_t wait_refresh(int timeout_ms)
 {
+    int64_t start_by = esp_timer_get_time() + START_TIMEOUT_MS * 1000;
+    while (gpio_get_level(PIN_EPD_BUSY)) {
+        if (esp_timer_get_time() > start_by) {
+            ESP_LOGE(TAG, "e-paper refresh never started (BUSY stayed high)");
+            return ESP_ERR_INVALID_STATE;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
     int64_t until = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
-    vTaskDelay(pdMS_TO_TICKS(2));
     while (!gpio_get_level(PIN_EPD_BUSY)) {
         if (esp_timer_get_time() > until) {
             ESP_LOGE(TAG, "e-paper still busy after %d ms", timeout_ms);
@@ -152,7 +163,7 @@ esp_err_t epd_show(const uint8_t *frame, const uint8_t *prev, epd_mode_t mode)
     ESP_RETURN_ON_ERROR(write_image(0x13, frame), TAG, "new image");
     ESP_RETURN_ON_ERROR(write_lut(mode == EPD_FULL ? LUT_GC : LUT_DU), TAG, "waveform");
     CMD(0x17, 0xA5);                         // power on, refresh, power off
-    esp_err_t err = wait_idle(REFRESH_TIMEOUT_MS);
+    esp_err_t err = wait_refresh(REFRESH_TIMEOUT_MS);
     CMD(0x07, 0xA5);                         // deep sleep until the next reset
     ESP_LOGD(TAG, "%s refresh: %d ms", mode == EPD_FULL ? "full" : "partial",
              (int)((esp_timer_get_time() - t0) / 1000));

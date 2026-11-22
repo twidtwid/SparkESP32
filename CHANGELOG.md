@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Fixed
+
+- E-paper: a rotation requested while a full refresh was running (the installer sets the
+  rotation right after flashing, during the start-up refresh) went out as a partial
+  refresh, leaving the old image ghosted until the hourly wipe. It's a full refresh now.
+- E-paper: a refresh that never started (its command lost) counted as shown, and the next
+  partial refresh compared against the wrong image. It's now an error, retried as a full
+  refresh.
+- The tools and the installer use the chip's own USB port when one is attached, so an
+  unrelated CH340 or CP210x adapter (a Zigbee stick, say) no longer makes them stop with
+  "several USB serial devices".
+- The agent opens a port exclusively, so it never writes into a port another program
+  holds, and it leaves a USB-UART bridge that's in use alone until it's replugged.
+- A USB-UART bridge replugged within the agent's two-second poll is retried, rather than
+  staying ignored until the agent restarts.
+
+### Changed
+
+- A board behind a USB-UART bridge that still runs 1.3.0 (console at 921600) is found
+  again: when it doesn't answer at 115200, the agent and the tools ask at 921600. A plain
+  `sudo ./install.sh` upgrades it; `--board` is no longer needed.
+- The installer and the docs say that the udev rule keeps ModemManager off every CH340 and
+  CP210x adapter on the Spark, not just the display.
+
 ## 1.4.0 — 2026-11-22
 
 ### Added

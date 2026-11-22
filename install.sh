@@ -347,7 +347,7 @@ fi
 
 # ------------------------------------------------------------------ service
 
-say "udev: keep ModemManager off the display"
+say "udev: keep ModemManager off the display (and off any CH340/CP210x serial adapter: the rule goes by chip)"
 install -m 0644 "$HERE/agent/99-sparkesp32.rules" "$RULES"
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=tty || true

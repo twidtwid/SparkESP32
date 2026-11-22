@@ -98,8 +98,15 @@ Most boards enumerate as an Espressif USB-Serial/JTAG device, **VID:PID `303a:10
 USB-UART bridge enumerates as the bridge: CH340 `1a86:7523`, CH343 `1a86:55d3`, CH9102
 `1a86:55d4` or CP210x `10c4:ea60` (`/dev/ttyUSB*`, `/dev/cu.usbserial-*`), with its
 console on UART0. Hosts open every port at **115200** baud: a bridge needs it, and USB
-CDC ignores it. The agent tries native ports first. A bridge that doesn't answer the
-handshake below is left alone until it's unplugged, since it may be some other gadget.
+CDC ignores it. On a bridge that doesn't answer at 115200 they ask again at 921600, the
+rate 1.3.0 used, so an older board is still found and can be upgraded.
+
+Hosts look at native ports first: the tools and the installer consider bridges only when
+no native port is attached, and the agent tries native ports before bridges. The agent
+opens a port exclusively, so it never writes into one another program holds. A bridge
+that doesn't answer the handshake below, or that another program holds, is left alone
+until it's replugged (a new device node, even at the same path), since it may be some
+other gadget.
 
 The agent writes one `stat` line per second, terminated by `\n`. The board replies
 `OK stat` or `ERR stat <field>`. The console echoes input, and the agent discards
