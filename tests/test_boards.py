@@ -171,13 +171,14 @@ class InstallerBoardDetection(unittest.TestCase):
             f"DEV_STATUS='{status}'; BOARD='{board}'; PORT=/dev/ttyUSB0; PORT_GIVEN='{port_given}'",
             'if unclaimed_bridge; then echo skip; else echo use; fi',
         ])
-        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20).stdout.strip()
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20)
+        return r.stdout.strip()
 
     def test_an_unknown_bridge_is_left_alone_unless_named(self):
         self.assertEqual(self.unclaimed("", bridge=True), "skip")            # some other CH340 gadget
         self.assertEqual(self.unclaimed("", bridge=True, board=EPD), "use")  # --board: flash a new display
         self.assertEqual(self.unclaimed("", bridge=True, port_given="/dev/ttyUSB0"), "use")   # --port
-        self.assertEqual(self.unclaimed(self.NEW_FW.format(EPD), bridge=True), "use")         # runs SparkESP32
+        self.assertEqual(self.unclaimed(self.NEW_FW.format(EPD), bridge=True), "use")   # runs SparkESP32
         self.assertEqual(self.unclaimed("", bridge=False), "use")           # native USB: as before
 
     def test_firmware_prints_the_field_the_installer_reads(self):
