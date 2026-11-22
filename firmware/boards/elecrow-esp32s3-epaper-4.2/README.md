@@ -97,5 +97,8 @@ port, ESP-IDF 5.5.6, driven from a DGX Spark over its CH340:
 - a reflash keeps the name
 - five chip resets in a row: the handshake answered after 4.6 s each time
 
-Not yet: Wi-Fi on this board (the same chip and firmware as the 5.79", where it works), and
-the installer and agent with this board on a Spark.
+On the Spark, with this branch's installer and agent: the installer found the board on
+`/dev/ttyUSB0`, left its firmware alone and set up Wi-Fi; the agent streams to it (protocol
+v2) and got its handshake at once, so opening the port doesn't reset it.
+
+Not yet: the board reading ONLINE · via WI-FI on its own (Wi-Fi is configured).
