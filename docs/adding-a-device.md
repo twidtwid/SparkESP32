@@ -289,5 +289,17 @@ why the photo is on the list.
 - **A black screen is usually the backlight.** A TFT with its backlight off looks
   powered down no matter what you send it. Find the backlight pin before you debug
   the panel.
+- **One product name, two boards.** Elecrow's CrowPanel 4.2" e-paper shipped in two
+  versions with different panel controllers and the same pins. Compare the factory app you
+  backed up with the vendor's published images (`cmp`): a byte-identical match says which
+  one you hold, where a photo or a listing can't.
+- **Vendor code can be wrong.** Elecrow's examples for that board read its BUSY pin
+  inverted and only work because of a long timeout. Before you copy the polarity or timing
+  of a signal your driver waits on, log its edges on the real board: read the pin every
+  couple of milliseconds after the command, for a few seconds, and log each change with
+  its time. One run settles it.
+- **Keep a bridge board's console at 115200.** At 921600, Linux's CH340 driver damaged
+  about 1 in 5 full-screen screenshots and broke an 8 MB `esptool read_flash` halfway;
+  macOS was fine, which is how it slips through. The stat feed needs ~200 bytes a second.
 - **Board IDs are permanent.** The ID ends up in release asset names and in the
   handshake, and the installer matches on it. Don't rename a board after it ships.

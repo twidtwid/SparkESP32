@@ -154,7 +154,9 @@ This is the order to work in and what to prove at each step.
    is**: `esptool image_info --version 2` on its app (see the guide's step 1), and the
    resolution and controller printed on the board against the vendor's page. Don't take
    the box's word for it: a board that isn't what it says passes every check except
-   the human looking at the screen.
+   the human looking at the screen. If the vendor sells versions under one name (the
+   CrowPanel 4.2" has two), `cmp` the backed-up app with each of the vendor's factory
+   images to know which one this is.
 3. **Collect facts, not code.** Pins, panel controller, init sequence, power-enable
    order, from the vendor's docs. Check the license of any vendor example before
    reusing it; with no license, write the driver yourself and cite the source in the
