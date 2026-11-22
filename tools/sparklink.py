@@ -2,8 +2,9 @@
 
 Finds the display by USB ID, proves it's running SparkESP32 firmware with the
 `status` handshake, and runs console commands until their terminating line, so
-a tool never writes to some other serial gadget and never acts on a half-read
-reply. Works on Linux (/dev/ttyACM*) and macOS (/dev/cu.usbmodem*).
+a tool never acts on some other serial gadget and never acts on a half-read
+reply. Works on Linux (/dev/ttyACM*, /dev/ttyUSB*) and macOS (/dev/cu.usbmodem*,
+/dev/cu.usbserial-*).
 """
 import re
 import sys
@@ -15,7 +16,15 @@ try:
 except ImportError:
     sys.exit("pyserial is missing: pip install pyserial  (or: uv run --with pyserial ...)")
 
-USB_VID, USB_PID = 0x303A, 0x1001          # Espressif USB-Serial/JTAG (ESP32-C6 native USB)
+# A display's USB serial port: the chip's own USB-Serial/JTAG on most boards, or a
+# USB-UART bridge in front of the chip on some (the Elecrow e-paper's CH340).
+# agent/sparkesp32_agent.py keeps the same lists (tests/test_agent.py checks).
+NATIVE_IDS = {(0x303A, 0x1001)}              # Espressif USB-Serial/JTAG
+BRIDGE_IDS = {(0x1A86, 0x7523),              # WCH CH340
+              (0x1A86, 0x55D3),              # WCH CH343
+              (0x1A86, 0x55D4),              # WCH CH9102
+              (0x10C4, 0xEA60)}              # Silicon Labs CP210x
+BAUD = 921600       # native USB ignores it; a board behind a bridge runs its console at this rate
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 ESP_LOG = re.compile(r"[EWIDV] \(\d+\) ")   # "I (4378) tag: ...": the board logging, never a reply
 PROMPT = "spark>"
@@ -33,10 +42,23 @@ class LinkError(RuntimeError):
 
 
 def find_ports():
-    """Every attached Espressif USB-Serial/JTAG port, macOS cu.* preferred over tty.*."""
-    ports = [p.device for p in serial.tools.list_ports.comports()
-             if p.vid == USB_VID and p.pid == USB_PID]
-    return sorted(p for p in ports if "/tty." not in p)
+    """Every attached port a display could be on: native USB first, then USB-UART
+    bridges; on macOS the cu.* device of each, not its tty.* twin."""
+    native, bridge = [], []
+    for p in serial.tools.list_ports.comports():
+        if "/tty." in p.device:
+            continue
+        if (p.vid, p.pid) in NATIVE_IDS:
+            native.append(p.device)
+        elif (p.vid, p.pid) in BRIDGE_IDS:
+            bridge.append(p.device)
+    return sorted(native) + sorted(bridge)
+
+
+def is_bridge(port):
+    """True if `port` is a USB-UART bridge (anything there may be some other gadget)."""
+    return any(p.device == port and (p.vid, p.pid) in BRIDGE_IDS
+               for p in serial.tools.list_ports.comports())
 
 
 def end_pattern(cmd):
@@ -54,7 +76,7 @@ class Link:
     def __init__(self, port):
         self.port = port
         try:
-            self.ser = serial.Serial(port, 115200, timeout=0.2, write_timeout=2)
+            self.ser = serial.Serial(port, BAUD, timeout=0.2, write_timeout=2)
         except serial.SerialException as e:
             raise LinkError(f"can't open {port}: {e}") from None
         time.sleep(0.2)
@@ -141,10 +163,10 @@ def connect(port=None):
     """Open the display (explicit port, or the single autodetected one) and handshake."""
     ports = [port] if port else find_ports()
     if not ports:
-        raise LinkError("no SparkESP32 display found on USB (Espressif 303a:1001). "
-                        "Is it plugged in with a data-capable USB-C cable?")
+        raise LinkError("no SparkESP32 display found on USB (Espressif 303a:1001, or a CH340/CP210x "
+                        "USB-UART bridge). Is it plugged in with a data-capable USB-C cable?")
     if len(ports) > 1:
-        raise LinkError(f"several Espressif USB devices found ({', '.join(ports)}); "
+        raise LinkError(f"several USB serial devices that could be a display ({', '.join(ports)}); "
                         "pick one with --port")
     link = Link(ports[0])
     try:

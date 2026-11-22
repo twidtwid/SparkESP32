@@ -93,8 +93,13 @@ arguments, and a token per core would run out on bigger machines.
 
 ## USB transport
 
-The display enumerates as an Espressif USB-Serial/JTAG device, **VID:PID `303a:1001`**
-(`/dev/ttyACM*` on Linux, `/dev/cu.usbmodem*` on macOS), 115200 baud (ignored by USB CDC).
+Most boards enumerate as an Espressif USB-Serial/JTAG device, **VID:PID `303a:1001`**
+(`/dev/ttyACM*` on Linux, `/dev/cu.usbmodem*` on macOS). A board whose USB port is a
+USB-UART bridge enumerates as the bridge: CH340 `1a86:7523`, CH343 `1a86:55d3`, CH9102
+`1a86:55d4` or CP210x `10c4:ea60` (`/dev/ttyUSB*`, `/dev/cu.usbserial-*`), with its
+console on UART0. Hosts open every port at **921600** baud: a bridge needs it, and USB
+CDC ignores it. The agent tries native ports first. A bridge that doesn't answer the
+handshake below is left alone until it's unplugged, since it may be some other gadget.
 
 The agent writes one `stat` line per second, terminated by `\n`. The board replies
 `OK stat` or `ERR stat <field>`. The console echoes input, and the agent discards

@@ -12,6 +12,9 @@
 //   BOARD_UI_W/H        the canvas the UI lays out on, in pixels, as the viewer sees it
 //                       (ui.c has a layout for each size it supports)
 //   BOARD_DISPLAY_MONO  1 for a black-and-white panel: the UI uses its mono theme
+// and may define:
+//   BOARD_UI_MIN_REFRESH_MS  for a slow screen (e-paper): new readings reach the canvas
+//                       at most this often; a change of state still shows at once
 #if !defined(BOARD_ID) || !defined(BOARD_UI_W) || !defined(BOARD_UI_H) || !defined(BOARD_DISPLAY_MONO)
 #error "the board's board_config.h must define BOARD_ID, BOARD_UI_W, BOARD_UI_H and BOARD_DISPLAY_MONO"
 #endif

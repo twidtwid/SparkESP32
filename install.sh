@@ -164,9 +164,11 @@ devctl() { "$PY" "$OPT/tools/devctl.py" ${PORT:+--port "$PORT"} "$@"; }
 
 # ------------------------------------------------------------------ display
 
+sparklink() { "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import sparklink; '"$1" "$OPT/tools" "${@:2}"; }
+PORT_GIVEN="$PORT"
 if [ -z "$PORT" ]; then
-    mapfile -t PORTS < <("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import sparklink; print("\n".join(sparklink.find_ports()))' "$OPT/tools")
-    [ "${#PORTS[@]}" -gt 1 ] && die "several Espressif USB devices attached (${PORTS[*]}); pick one with --port"
+    mapfile -t PORTS < <(sparklink 'print("\n".join(sparklink.find_ports()))')
+    [ "${#PORTS[@]}" -gt 1 ] && die "several USB serial devices that could be the display (${PORTS[*]}); pick one with --port"
     PORT="${PORTS[0]:-}"
 fi
 
@@ -211,12 +213,24 @@ read_status() { DEV_STATUS="$(devctl status 2>/dev/null)" || DEV_STATUS=""; }
 board_version() { sed -n 's/^fw=sparkesp32 version=\([^ ]*\).*/\1/p' <<<"$DEV_STATUS"; }
 status_board() { sed -n 's/^fw=sparkesp32 .*board=\([^ ]*\).*/\1/p' <<<"$DEV_STATUS"; }   # "" before boards
 
+# A USB-UART bridge (CH340, CP210x) found on its own may be some other gadget: flash it
+# only when it already runs SparkESP32 or --board/--port says a new board is there.
+unclaimed_bridge() {
+    [ -z "$(board_version)" ] && [ -z "$BOARD" ] && [ -z "$PORT_GIVEN" ] &&
+        [ "$(sparklink 'print(int(sparklink.is_bridge(sys.argv[2])))' "$PORT")" = 1 ]; }
+
+[ -n "$PORT" ] && read_status
+if [ -n "$PORT" ] && unclaimed_bridge; then
+    warn "$PORT is a USB-UART bridge that doesn't answer as a SparkESP32: leaving it alone."
+    warn "To flash a new display behind one (the Elecrow e-paper), name it: --board <id>"
+    PORT="" DEV_STATUS=""
+fi
+
 if [ -z "$PORT" ]; then
     warn "no display on USB: skipping flash + setup. Plug it into this Spark and re-run,"
     warn "or set it up from another computer (README: 'Setting up from a Mac or PC')."
 else
     say "display found on $PORT"
-    read_status
     BOARD_VER="$(board_version)"
     if [ -n "$NO_FLASH" ]; then
         [ -n "$BOARD_VER" ] || warn "the board isn't running SparkESP32 firmware and --no-flash was given"

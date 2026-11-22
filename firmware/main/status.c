@@ -1,6 +1,7 @@
 #include "status.h"
 
 #include <errno.h>
+#include <string.h>
 
 // The screen's fonts are ASCII plus a few symbols: no typographic ellipsis.
 static const char *problem_text(link_problem_t p)
@@ -36,6 +37,14 @@ status_t status_of(const status_in_t *in)
     if (in->wifi_configured || in->ever_fed)   // over USB alone, the reason is unknowable
         return (status_t){SCREEN_OFFLINE, "OFFLINE", in->wifi_configured ? feed_text(in->feed) : ""};
     return (status_t){SCREEN_WAITING, "WAITING", ""};
+}
+
+bool status_redraw_due(const char *shown_label, const char *shown_reason, const char *label,
+                       const char *reason, uint32_t since_ms, uint32_t min_ms)
+{
+    if (min_ms == 0 || !shown_label || !shown_reason) return true;
+    if (strcmp(shown_label, label) != 0 || strcmp(shown_reason, reason) != 0) return true;
+    return since_ms >= min_ms;
 }
 
 feed_t feed_classify(bool connected, int sock_errno, int http_status, bool parsed)

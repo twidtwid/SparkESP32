@@ -54,9 +54,16 @@ def check(board, root=ROOT):
     want = f'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/{board}/partitions.csv"'
     if want not in sdk:
         problems.append(f"sdkconfig.defaults: {want}")
-    if "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y" not in sdk:
-        problems.append("sdkconfig.defaults: CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y (the agent and tools "
-                        "find the display by the USB-Serial/JTAG ID; see docs/adding-a-device.md)")
+    # The console is the agent's USB transport: the chip's own USB-Serial/JTAG, or for a
+    # board whose USB port is a USB-UART bridge, UART0 at the rate the agent and tools open.
+    usj = "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y" in sdk
+    uart = ("CONFIG_ESP_CONSOLE_UART_CUSTOM=y" in sdk and "CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y" in sdk
+            and "CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600" in sdk)
+    if not (usj or uart):
+        problems.append("sdkconfig.defaults: the console on CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y, or, "
+                        "behind a USB-UART bridge, on UART0 at 921600 (CONFIG_ESP_CONSOLE_UART_CUSTOM=y, "
+                        "CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y, CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600); "
+                        "see docs/adding-a-device.md")
 
     cmake = (d / "board/CMakeLists.txt").read_text()
     if not re.search(r"REQUIRES[^)]*\bboard_api\b", cmake):

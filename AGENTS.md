@@ -24,7 +24,8 @@ there), and the display is plugged into one of the Spark's USB-C ports with a da
 
 ```bash
 git clone https://github.com/twidtwid/SparkESP32.git && cd SparkESP32
-lsusb | grep -i 303a:1001          # the display: "Espressif USB JTAG/serial debug unit"
+lsusb | grep -iE '303a:1001|1a86:7523'   # the display: "Espressif USB JTAG/serial debug unit"
+                                         # (the Elecrow e-paper: a CH340, "QinHeng ... USB Serial")
 ```
 
 Decide with the human (ask; don't guess):
@@ -50,7 +51,8 @@ sudo --preserve-env=WIFI_PSK ./install.sh --yes --ssids "HomeNet" --wifi-passwor
 ```
 
 Useful flags: `--host <ip>` when mDNS (`<hostname>.local`) doesn't resolve on their LAN;
-`--port /dev/ttyACMn` if several Espressif boards are attached; `--board <id>` if the
+`--port /dev/ttyACMn` (or `/dev/ttyUSBn` behind a USB-UART bridge) if several possible
+displays are attached; `--board <id>` if the
 installer can't tell which supported board it is (it asks the firmware, then the chip);
 `--no-flash` to leave the firmware alone; `--lan <cidr>` to override the subnet ufw
 allows; `--no-sparkline` to sample even when a Sparkline agent runs there (by default the
@@ -84,7 +86,7 @@ agent/
   sparkesp32_agent.py      sampler (or a Sparkline agent's readings) + USB push + HTTP
                            /stat,/healthz (stdlib + pyserial)
   sparkesp32.service       systemd unit template (@RUN_USER@)
-  99-sparkesp32.rules      udev: ModemManager ignore for 303a:1001
+  99-sparkesp32.rules      udev: ModemManager ignores the display's USB IDs (native + bridges)
   requirements.txt         pinned pyserial + esptool for /opt/sparkesp32/venv
 tools/
   sparklink.py             serial plumbing: find by USB ID, handshake, run-until-terminator
@@ -142,9 +144,10 @@ docs/                      protocol.md, troubleshooting.md, adding-a-device.md
 The human guide is [docs/adding-a-device.md](docs/adding-a-device.md); read it first.
 This is the order to work in and what to prove at each step.
 
-1. **Confirm the board can work** before writing code: an ESP32-C3/C5/C6/S3 (Wi-Fi plus
-   native USB-Serial/JTAG), USB wired to the chip, `VID:PID=303A:1001` in
-   `python3 -m serial.tools.list_ports -v`, 8 MB+ flash. If any of these fail, stop and
+1. **Confirm the board can work** before writing code: an ESP32-C3/C5/C6/S3 (Wi-Fi),
+   USB wired to the chip (`VID:PID=303A:1001` in `python3 -m serial.tools.list_ports -v`)
+   or to a CH340/CH343/CH9102/CP210x bridge (then the console goes on UART0 at 921600,
+   as the Elecrow e-paper's does), 8 MB+ flash. If any of these fail, stop and
    tell the human why.
 2. **Back up the factory flash** (`esptool read_flash 0 <flash size> factory.bin`) to a
    path outside the repo, and tell the human where it is. Then **prove which board it

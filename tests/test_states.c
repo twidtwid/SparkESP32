@@ -235,6 +235,25 @@ static void test_feed_classify(void)
     CHECK(feed_classify(true, 0, 200, true) == FEED_OK, "200, parsed: ok");
 }
 
+// ---------------------------------------------------------------- the e-paper's cadence
+
+static void test_redraw_due(void)
+{
+    CHECK(status_redraw_due("ONLINE", "via USB", "ONLINE", "via USB", 0, 0),
+          "min 0 (every screen but e-paper): always");
+    CHECK(status_redraw_due(NULL, NULL, "WAITING", "", 0, 10000), "the first redraw: always");
+    CHECK(!status_redraw_due("ONLINE", "via USB", "ONLINE", "via USB", 9999, 10000),
+          "same header, too soon: wait");
+    CHECK(status_redraw_due("ONLINE", "via USB", "ONLINE", "via USB", 10000, 10000), "due");
+    CHECK(status_redraw_due("ONLINE", "via USB", "OFFLINE", "", 1, 10000), "a new state: at once");
+    CHECK(status_redraw_due("ONLINE", "via USB", "ONLINE", "CLOCK STUCK", 1, 10000),
+          "a new line under the state: at once");
+    CHECK(status_redraw_due("ONLINE", "via USB", "ONLINE", "via WI-FI", 1, 10000),
+          "USB to Wi-Fi: at once");
+    char copy[] = "ONLINE";                 // compared by text, not by pointer
+    CHECK(!status_redraw_due(copy, "via USB", "ONLINE", "via USB", 1, 10000), "equal text: wait");
+}
+
 int main(void)
 {
     test_reset();
@@ -248,6 +267,7 @@ int main(void)
     test_problem_mapping();
     test_screen();
     test_feed_classify();
+    test_redraw_due();
     if (failures) {
         printf("%d of %d state checks FAILED\n", failures, total);
         return 1;

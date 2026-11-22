@@ -26,7 +26,11 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "driver/usb_serial_jtag.h"
+#else
+#include "driver/uart.h"
+#endif
 #include "esp_app_desc.h"
 #include "esp_console.h"
 #include "esp_crc.h"
@@ -39,8 +43,10 @@
 
 // ---------------------------------------------------------------- shot
 
-// The dump bypasses stdio and goes straight to the USB-Serial/JTAG driver.
-// ESP-IDF's console throws away every write() while its USB connection monitor
+// The dump bypasses stdio and goes straight to the console's driver.
+//
+// On the chip's own USB-Serial/JTAG (most boards), that matters. ESP-IDF's
+// console throws away every write() while its USB connection monitor
 // (usb_serial_jtag_is_connected(), which watches for the host's start-of-frame
 // packets on each FreeRTOS tick) says the host is gone, and still reports
 // success: vfs_console's write returns the full size. On the C6 that monitor
@@ -56,10 +62,18 @@
 static lv_display_flush_cb_t s_orig_flush;
 static bool s_shot_ok;      // false once a write timed out: the rest is skipped
 
+// Behind a USB-UART bridge (the console on UART0, e.g. the Elecrow e-paper), the UART
+// driver blocks until the bytes are queued and never drops any: the wire runs at the
+// baud rate whether or not anyone listens.
 static void shot_write(const char *buf, size_t len)
 {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     if (s_shot_ok && usb_serial_jtag_write_bytes(buf, len, pdMS_TO_TICKS(SHOT_WRITE_TIMEOUT_MS)) != (int)len)
         s_shot_ok = false;
+#else
+    if (s_shot_ok && uart_write_bytes(CONFIG_ESP_CONSOLE_UART_NUM, buf, len) != (int)len)
+        s_shot_ok = false;
+#endif
 }
 
 // one "\r\n"-terminated line, as the console's own output ends its lines
@@ -109,7 +123,7 @@ static int cmd_shot(int argc, char **argv)
     if (display_lock(5000) != ESP_OK) { printf("ERR lock\n"); return 1; }
     esp_log_level_t prev = esp_log_level_get("*");
     esp_log_level_set("*", ESP_LOG_NONE);
-    ui_update();
+    ui_update_now();
     lv_display_t *disp = lv_display_get_default();
     s_orig_flush = disp->flush_cb;
     lv_display_set_flush_cb(disp, tee_flush_cb);
@@ -152,7 +166,7 @@ static int cmd_demo(int argc, char **argv)
     int load = argc > 1 ? atoi(argv[1]) : 42;
     if (display_lock(3000) != ESP_OK) { printf("ERR lock\n"); return 1; }
     spark_demo(load);
-    ui_update();
+    ui_update_now();
     display_unlock();
     printf("OK demo %d\n", load);
     return 0;
@@ -179,6 +193,8 @@ static int cmd_rot(int argc, char **argv)
     int r = display_rot_from_name(argv[1]);
     if (r < 0) { printf("ERR usage: rot none|ccw|cw\n"); return 1; }
     if (display_lock(5000) != ESP_OK) { printf("ERR lock\n"); return 1; }
+    lv_display_t *disp = lv_display_get_default();
+    int32_t w = lv_display_get_horizontal_resolution(disp);
     display_rot_t prev = display_get_rotation();
     if (display_set_rotation((display_rot_t)r) != ESP_OK) {
         display_unlock();
@@ -191,8 +207,9 @@ static int cmd_rot(int argc, char **argv)
         printf("ERR rot save\n");
         return 1;
     }
+    if (lv_display_get_horizontal_resolution(disp) != w) ui_rebuild();   // wide <-> tall
     lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(lv_display_get_default());
+    lv_refr_now(disp);
     display_unlock();
     printf("OK rot\n");
     return 0;
@@ -301,7 +318,16 @@ void console_start(void)
     for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
         ESP_ERROR_CHECK(esp_console_cmd_register(&cmds[i]));
 
+    // the board's sdkconfig.defaults picks the console: the chip's own USB, or a UART
+    // behind a USB-UART bridge
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     esp_console_dev_usb_serial_jtag_config_t hw = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&hw, &rc, &repl));
+#elif CONFIG_ESP_CONSOLE_UART
+    esp_console_dev_uart_config_t hw = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_console_new_repl_uart(&hw, &rc, &repl));
+#else
+#error "SparkESP32 needs its console on USB-Serial/JTAG or a UART (the board's sdkconfig.defaults)"
+#endif
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

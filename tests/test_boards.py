@@ -23,6 +23,7 @@ import new_board  # noqa: E402
 C6 = "waveshare-esp32c6-amoled-2.16"
 TFT = "lcdwiki-esp32s3-tft-2.8"
 RLCD = "waveshare-esp32s3-rlcd-4.2"
+EPD = "elecrow-esp32s3-epaper-5.79"
 
 
 def scratch_tree():
@@ -65,6 +66,19 @@ class CheckBoards(unittest.TestCase):
     def test_needs_a_screenshot(self):
         (self.root / "assets" / "boards" / f"{TFT}.png").unlink()
         self.assertIn(f"assets/boards/{TFT}.png", self.problems())
+
+    def test_console_on_native_usb_or_a_uart_at_the_tools_rate(self):
+        sdk = self.d / "sdkconfig.defaults"
+        native = sdk.read_text()
+        sdk.write_text(native.replace("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
+                                      "CONFIG_ESP_CONSOLE_UART_DEFAULT=y"))
+        self.assertIn("the console on", self.problems())          # UART, but at the default 115200
+        bridge = (self.root / "firmware" / "boards" / EPD / "sdkconfig.defaults").read_text()
+        self.assertIn("CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600", bridge)
+        sdk.write_text(native.replace("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
+                                      "CONFIG_ESP_CONSOLE_UART_CUSTOM=y\nCONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y\n"
+                                      "CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600"))
+        self.assertNotIn("the console on", self.problems())
 
     def test_needs_a_layout_for_its_size(self):
         cfg = self.d / "board" / "include" / "board_config.h"
@@ -148,6 +162,23 @@ class InstallerBoardDetection(unittest.TestCase):
         r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
                            env={**os.environ, "FAKE_CHIP": chip}, timeout=20)
         return r.stdout.strip()
+
+    def unclaimed(self, status, bridge, board="", port_given=""):
+        script = "\n".join([
+            "set -u",
+            installer_functions("board_version", "unclaimed_bridge"),
+            f"sparklink() {{ echo {int(bridge)}; }}",           # stands in for sparklink.is_bridge()
+            f"DEV_STATUS='{status}'; BOARD='{board}'; PORT=/dev/ttyUSB0; PORT_GIVEN='{port_given}'",
+            'if unclaimed_bridge; then echo skip; else echo use; fi',
+        ])
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20).stdout.strip()
+
+    def test_an_unknown_bridge_is_left_alone_unless_named(self):
+        self.assertEqual(self.unclaimed("", bridge=True), "skip")            # some other CH340 gadget
+        self.assertEqual(self.unclaimed("", bridge=True, board=EPD), "use")  # --board: flash a new display
+        self.assertEqual(self.unclaimed("", bridge=True, port_given="/dev/ttyUSB0"), "use")   # --port
+        self.assertEqual(self.unclaimed(self.NEW_FW.format(EPD), bridge=True), "use")         # runs SparkESP32
+        self.assertEqual(self.unclaimed("", bridge=False), "use")           # native USB: as before
 
     def test_firmware_prints_the_field_the_installer_reads(self):
         src = (ROOT / "firmware" / "main" / "console_cmds.c").read_text()

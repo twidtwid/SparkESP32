@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- A fourth board: the Elecrow CrowPanel ESP32 5.79" E-Paper
+  (`elecrow-esp32s3-epaper-5.79`), a 792×272 black-and-white e-paper run by two cascaded
+  SSD1683 controllers. Updates are partial refreshes, with no flash, at most every 10 s;
+  a change of state (ONLINE to OFFLINE, CLOCK STUCK) still shows at once, and a full
+  refresh wipes the ghosting once an hour. Wide by default; `--rotation ccw` stands it on
+  its short end, USB-C on the right, with a tall layout of its own.
+- Boards whose USB port is a USB-UART bridge (CH340, CH343, CH9102, CP210x): the agent,
+  the installer and the host tools find them as well as the chip's own USB, and open every
+  port at 921600 baud (native USB ignores the rate). A bridge that doesn't answer as a
+  SparkESP32 is left alone until it's replugged, and the installer skips one unless
+  `--board` or `--port` names it. ModemManager is kept off the bridges too.
+
+### Changed
+
+- A board can offer a wide and a tall canvas, one rotation each; the UI lays itself out
+  again when the shape changes. Layouts give each ring and tile its own position.
+
 ## 1.2.0 — 2026-11-21
 
 ### Added

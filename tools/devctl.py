@@ -12,7 +12,8 @@
   devctl.py log [seconds]            passively capture the console (default 15 s)
 
 Wi-Fi passwords go through provision.py, which never prints them.
-Port: --port PATH, $SPARKESP32_PORT, or autodetect (Espressif USB 303a:1001).
+Port: --port PATH, $SPARKESP32_PORT, or autodetect (Espressif USB 303a:1001, or a
+CH340/CP210x USB-UART bridge).
 """
 import argparse
 import base64

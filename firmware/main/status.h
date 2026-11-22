@@ -10,6 +10,7 @@
 //   WAITING   nothing configured or received yet
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "link.h"
 #include "spark_data.h"
 
@@ -50,6 +51,14 @@ status_t status_of(const status_in_t *in);
 // not, if it wasn't; http_status: 0 if no response came; parsed: the body was a
 // stat line the parser accepted.
 feed_t feed_classify(bool connected, int sock_errno, int http_status, bool parsed);
+
+// Whether the screen should take new readings now. A slow screen (e-paper: the
+// board's BOARD_UI_MIN_REFRESH_MS) shows new readings at most every min_ms, but a
+// change in what the header says (its label, or the line under it) goes out at
+// once. shown_label/shown_reason: what the header said at the last redraw (NULL
+// before the first). min_ms 0: every update redraws, as on every other screen.
+bool status_redraw_due(const char *shown_label, const char *shown_reason, const char *label,
+                       const char *reason, uint32_t since_ms, uint32_t min_ms);
 
 const char *feed_name(feed_t f);        // lowercase, for `status`
 const char *screen_name(screen_t s);    // lowercase, for `status`

@@ -25,6 +25,7 @@ the host are never written to. Installed by install.sh as a systemd service.
 import argparse
 import json
 import logging
+import math
 import os
 import select
 import signal
@@ -48,9 +49,18 @@ except ImportError:  # HTTP-only mode
 __version__ = "1.2.0"
 log = logging.getLogger("sparkesp32")
 
-USB_VID, USB_PID = 0x303A, 0x1001     # Espressif USB-Serial/JTAG (ESP32-C6 native USB)
+# The display's USB serial port: the chip's own USB-Serial/JTAG on most boards, or a
+# USB-UART bridge in front of it on some (the Elecrow e-paper's CH340). tools/sparklink.py
+# keeps the same lists.
+NATIVE_IDS = {(0x303A, 0x1001)}       # Espressif USB-Serial/JTAG
+BRIDGE_IDS = {(0x1A86, 0x7523),       # WCH CH340
+              (0x1A86, 0x55D3),       # WCH CH343
+              (0x1A86, 0x55D4),       # WCH CH9102
+              (0x10C4, 0xEA60)}       # Silicon Labs CP210x
+BAUD = 921600                         # native USB ignores it; a board behind a bridge runs its console at it
 HANDSHAKE = b"fw=sparkesp32"
-REJECT_S = 300.0                      # a port that fails the handshake is skipped this long
+REJECT_S = 300.0                      # a native port that fails the handshake is skipped this long;
+                                      # a bridge, until it's replugged: it may be some other gadget
 HANDSHAKE_S = 10.0                    # keep asking a just-plugged-in board this long: it's still
                                       # booting, then its console drops input for 0.5 s
 STALE_S = 5.0                        # /stat answers 503 if the sampler is older than this
@@ -439,8 +449,10 @@ def make_handler(sampler):
 # ---------------------------------------------------------------- serial
 
 def candidate_ports():
-    return sorted(p.device for p in serial.tools.list_ports.comports()
-                  if p.vid == USB_VID and p.pid == USB_PID)
+    """[(device, is_bridge)]: native USB ports first, then USB-UART bridges."""
+    found = [(p.device, (p.vid, p.pid) in BRIDGE_IDS) for p in serial.tools.list_ports.comports()
+             if (p.vid, p.pid) in NATIVE_IDS or (p.vid, p.pid) in BRIDGE_IDS]
+    return sorted(found, key=lambda d: (d[1], d[0]))
 
 
 HANDSHAKE_LINE = re.compile(re.escape(HANDSHAKE) + rb"[^\r\n]*[\r\n]")
@@ -478,7 +490,8 @@ def serial_loop(sampler, explicit_port, stop):
       streaming    pushing stat lines to "port" ("answered_in_s": handshake time,
                    "proto": the protocol its firmware reads)
       rejected     "port" didn't answer as a SparkESP32: skipped until it's
-                   replugged or REJECT_S passes ("retry_in_s")
+                   replugged or REJECT_S passes ("retry_in_s"; null for a
+                   USB-UART bridge, which waits for the replug)
     """
     ser, last_at, rejected, proto = None, 0.0, {}, 1
     while not stop.is_set():
@@ -487,27 +500,31 @@ def serial_loop(sampler, explicit_port, stop):
                 now = time.monotonic()
                 # unplugging forgets a rejection, so a replug is always retried at once
                 rejected = {p: t for p, t in rejected.items() if t > now and os.path.exists(p)}
-                ports = [explicit_port] if explicit_port else candidate_ports()
-                ports = [p for p in ports if p not in rejected]
+                ports = [(explicit_port, False)] if explicit_port else candidate_ports()
+                ports = [(p, b) for p, b in ports if p not in rejected]
                 if not ports:
                     if rejected:
                         port, until = min(rejected.items(), key=lambda kv: kv[1])
                         sampler.display = {"state": "rejected", "port": port,
-                                           "retry_in_s": round(until - now)}
+                                           "retry_in_s": None if until == math.inf else round(until - now)}
                     else:
                         sampler.display = {"state": "searching"}
                     stop.wait(2)
                     continue
-                port = ports[0]
+                port, bridge = ports[0]
                 sampler.display = {"state": "handshaking", "port": port}
-                ser = serial.Serial(port, 115200, timeout=0.2, write_timeout=1)
+                ser = serial.Serial(port, BAUD, timeout=0.2, write_timeout=1)
                 t0 = time.monotonic()
                 proto = handshake(ser, HANDSHAKE_S)
                 if not proto:
-                    log.warning("%s is an Espressif USB device but not a SparkESP32; ignoring it "
-                                "for %d minutes or until it's replugged", port, REJECT_S // 60)
+                    if bridge:      # a USB-UART bridge may be any gadget: ask it once per plug-in
+                        log.warning("%s (a USB-UART bridge) didn't answer as a SparkESP32; leaving it "
+                                    "alone until it's replugged", port)
+                    else:
+                        log.warning("%s is an Espressif USB device but not a SparkESP32; ignoring it "
+                                    "for %d minutes or until it's replugged", port, REJECT_S // 60)
                     ser.close()
-                    ser, rejected[port] = None, time.monotonic() + REJECT_S
+                    ser, rejected[port] = None, math.inf if bridge else time.monotonic() + REJECT_S
                     continue
                 took = round(time.monotonic() - t0, 1)
                 log.info("display connected on %s (answered in %.1fs, protocol v%d)", port, took, proto)

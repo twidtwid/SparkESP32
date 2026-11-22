@@ -32,6 +32,7 @@ A board directory holds:
 | `partitions.csv` | its partition table |
 | `dependencies.lock` | the component versions it builds with (written by the first build) |
 | `README.md` | hardware notes: pins, sources, quirks, and what has been verified on the real thing |
+| `elecrow-esp32s3-epaper-5.79` | ESP32-S3 | 5.79" 792×272 e-paper, black and white, two SSD1683s, wide or tall; USB through a CH340 | Verified on hardware. The e-paper example: partial refresh, a slower cadence, two canvas shapes, a USB-UART bridge |
 
 `make check` runs `tools/check_boards.py`, which checks all of the above, plus that the
 README has a **Verified** section and the board has its screenshot.

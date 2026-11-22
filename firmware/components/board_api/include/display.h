@@ -22,7 +22,9 @@ esp_err_t display_lock(int timeout_ms);
 void      display_unlock(void);
 
 // Caller holds the lock. ESP_ERR_NOT_SUPPORTED if this board can't show that
-// rotation (e.g. a landscape-only layout asked for portrait).
+// rotation (e.g. a landscape-only layout asked for portrait). A board that offers
+// both a wide and a tall canvas changes LVGL's resolution here; the caller then
+// lays the UI out again (ui_rebuild).
 esp_err_t     display_set_rotation(display_rot_t rot);
 display_rot_t display_get_rotation(void);
 

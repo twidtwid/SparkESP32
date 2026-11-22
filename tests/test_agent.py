@@ -455,11 +455,11 @@ def streaming_to(board):
 class SerialLoopTest(unittest.TestCase):
     """The link states serial_loop publishes for /healthz, with stand-in ports and boards."""
 
-    def run_loop(self, open_port, done, timeout=4.0):
+    def run_loop(self, open_port, done, timeout=4.0, bridge=False):
         with tempfile.NamedTemporaryFile() as dev:     # a port path that exists, like a real node
             saved = agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S
             agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S = (
-                lambda: [dev.name]), open_port, 0.3
+                lambda: [(dev.name, bridge)]), open_port, 0.3
             line = "stat 1 2 3 4 5 6 7 h 2405 0"
             sampler = types.SimpleNamespace(display={"state": "searching"},
                                             latest=lambda: (line, time.monotonic(), {}))
@@ -494,11 +494,64 @@ class SerialLoopTest(unittest.TestCase):
         self.assertEqual((d["state"], d["port"]), ("rejected", port))
         self.assertGreater(d["retry_in_s"], agent.REJECT_S - 10)
 
+    def test_a_silent_bridge_waits_for_a_replug(self):
+        # a USB-UART bridge may be any gadget: asked once, then left alone while it's plugged in
+        d, port = self.run_loop(lambda *a, **k: BootingBoard(deaf=10**6), lambda d: d["state"] == "rejected",
+                                bridge=True)
+        self.assertEqual((d["state"], d["port"], d["retry_in_s"]), ("rejected", port, None))
+        json.dumps(d, allow_nan=False)                 # /healthz stays valid JSON
+
+    def test_a_display_behind_a_bridge_streams(self):
+        opened = []
+        board = BootingBoard(deaf=0)
+
+        def open_port(*a, **k):
+            opened.append(a[1] if len(a) > 1 else k.get("baudrate"))
+            return board
+        d, port = self.run_loop(open_port, streaming_to(board), bridge=True)
+        self.assertEqual((d["state"], d["port"]), ("streaming", port))
+        self.assertEqual(opened, [agent.BAUD])          # the bridge's UART rate (native USB ignores it)
+
     def test_a_port_that_wont_open_says_why(self):
         def denied(*a, **k):
             raise OSError("permission denied")
         d, _ = self.run_loop(denied, lambda d: "error" in d)
         self.assertEqual((d["state"], d["error"]), ("searching", "permission denied"))
+
+
+class PortDiscoveryTest(unittest.TestCase):
+    PORTS = [
+        types.SimpleNamespace(device="/dev/ttyUSB0", vid=0x1A86, pid=0x7523),    # CH340 bridge
+        types.SimpleNamespace(device="/dev/ttyACM1", vid=0x303A, pid=0x1001),    # native USB
+        types.SimpleNamespace(device="/dev/ttyACM0", vid=0x303A, pid=0x1001),
+        types.SimpleNamespace(device="/dev/ttyUSB1", vid=0x0403, pid=0x6001),    # FTDI: not ours
+        types.SimpleNamespace(device="/dev/ttyS0", vid=None, pid=None),          # no USB at all
+        types.SimpleNamespace(device="/dev/cu.usbserial-10", vid=0x10C4, pid=0xEA60),
+        types.SimpleNamespace(device="/dev/tty.usbserial-10", vid=0x10C4, pid=0xEA60),   # its macOS twin
+    ]
+
+    def setUp(self):
+        self.saved = agent.serial.tools.list_ports.comports
+        agent.serial.tools.list_ports.comports = lambda: self.PORTS
+
+    def tearDown(self):
+        agent.serial.tools.list_ports.comports = self.saved
+
+    def test_agent_puts_native_ports_first(self):
+        self.assertEqual(agent.candidate_ports(), [
+            ("/dev/ttyACM0", False), ("/dev/ttyACM1", False),
+            ("/dev/cu.usbserial-10", True), ("/dev/tty.usbserial-10", True), ("/dev/ttyUSB0", True)])
+
+    def test_tools_skip_macos_tty_twins(self):
+        self.assertEqual(sparklink.find_ports(),
+                         ["/dev/ttyACM0", "/dev/ttyACM1", "/dev/cu.usbserial-10", "/dev/ttyUSB0"])
+        self.assertTrue(sparklink.is_bridge("/dev/ttyUSB0"))
+        self.assertFalse(sparklink.is_bridge("/dev/ttyACM0"))
+        self.assertFalse(sparklink.is_bridge("/dev/ttyUSB1"))
+
+    def test_agent_and_tools_agree(self):
+        self.assertEqual((agent.NATIVE_IDS, agent.BRIDGE_IDS, agent.BAUD),
+                         (sparklink.NATIVE_IDS, sparklink.BRIDGE_IDS, sparklink.BAUD))
 
 
 def link_with(replies):

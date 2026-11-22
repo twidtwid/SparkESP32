@@ -63,7 +63,8 @@ Use the **New device** issue template. It asks for the board, its chip and
 display, and whether it passes
 [Will your board work?](docs/adding-a-device.md#will-your-board-work). Someone
 will confirm it fits before you spend an evening on it, or tell you why it
-doesn't (most often: a USB-UART bridge instead of the chip's own USB).
+doesn't (most often: a chip SparkESP32 doesn't build for, or a USB-UART bridge the
+agent doesn't know yet).
 
 ### 2. Start the board
 

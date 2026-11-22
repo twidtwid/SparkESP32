@@ -14,6 +14,7 @@ more boards show the two usual ways to drive a panel:
 |---|---|---|
 | [LCDWiki ES3C28P](../firmware/boards/lcdwiki-esp32s3-tft-2.8) | The common case: a color SPI TFT (ILI9341V) with a backlight, driven by Espressif's `esp_lcd_ili9341` component. Start here. | Verified on hardware |
 | [Waveshare ESP32-S3-RLCD-4.2](../firmware/boards/waveshare-esp32s3-rlcd-4.2) | A panel with no `esp_lcd` driver: a hand-written ST7306 driver for a 1-bit reflective LCD, and a mono theme. | Verified on hardware |
+| [Elecrow CrowPanel 5.79" E-Paper](../firmware/boards/elecrow-esp32s3-epaper-5.79) | E-paper: two cascaded SSD1683 controllers, partial refreshes at a slower cadence, a wide and a tall canvas, and a USB-UART bridge (CH340) instead of the chip's own USB. | Verified on hardware |
 
 AI agents: [AGENTS.md](../AGENTS.md#adding-a-new-device) has the same steps as a checklist.
 To submit a board, see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-new-device).
@@ -22,8 +23,8 @@ To submit a board, see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-new-device)
 
 | Need | Why |
 |---|---|
-| An ESP32 with **Wi-Fi** and a **native USB-Serial/JTAG** controller: ESP32-C3, C5, C6 or S3 | The agent finds the display by that controller's USB ID, `303a:1001`, and the console runs on it. The original ESP32 and the S2 don't have one. |
-| The board's USB-C port wired to the **chip's own USB pins**, not to a USB-UART bridge (CP2102, CH340) | A bridge shows up with another USB ID, and the agent won't find it. Plug the board in and run `python3 -m serial.tools.list_ports -v`: you want `VID:PID=303A:1001`. |
+| An **ESP32-C3, C5, C6 or S3** (Wi-Fi) | The chips SparkESP32 builds for, all with a native USB-Serial/JTAG controller. The original ESP32 and the S2 aren't supported. |
+| The board's USB-C port wired to the **chip's own USB pins**, or to a **CH340, CH343, CH9102 or CP210x** USB-UART bridge | The agent finds the display by USB ID: `303a:1001` for the chip's own USB, or one of those bridges. Plug the board in and run `python3 -m serial.tools.list_ports -v`. Behind a bridge, the console runs on UART0 at 921600 (the Elecrow e-paper shows how). |
 | **8 MB flash** or more | The app is about 1.7 MB and the default partition table has a 6 MB app slot. A 4 MB board works with a smaller slot in its own `partitions.csv`. |
 | A display LVGL 9 can drive, roughly 300 px or more on each side | Smaller screens need a new UI layout, and very small ones may not fit the content. |
 
@@ -69,6 +70,7 @@ layout table.
 | `BOARD_ID` | The directory name, e.g. `"waveshare-esp32s3-rlcd-4.2"`. It's reported in the handshake (`board=`), and the installer uses it to pick the matching firmware. |
 | `BOARD_UI_W`, `BOARD_UI_H` | The canvas the UI lays out on, as the viewer sees it, in pixels. `ui.c` needs a layout for this size. |
 | `BOARD_DISPLAY_MONO` | `1` for a black-and-white panel. The UI then draws only black on white, with outlines where the color theme uses fills. |
+| `BOARD_UI_MIN_REFRESH_MS` | Optional, for a slow screen (e-paper): new readings reach the canvas at most this often, while a change of state still shows at once. Leave it out (`0`) and every update redraws. |
 
 Two rules the shared code relies on:
 
@@ -150,7 +152,10 @@ writes one), replaces the README with a skeleton, and lists the board in
 
 - **`board/include/board_config.h`**: the UI size and the mono flag.
 - **`sdkconfig.defaults`**: the flash size, and PSRAM if any (remove the copied PSRAM
-  lines if your board has none). Keep `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`.
+  lines if your board has none). Keep `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, or, if the
+  board's USB goes through a USB-UART bridge, put the console on UART0 at 921600 (copy
+  the e-paper's `CONFIG_ESP_CONSOLE_UART_*` lines: only a "custom" UART console takes a
+  baud rate other than 115200).
 - **`partitions.csv`**: the shared layout fits 8 MB and up. For 4 MB, shrink the app slot to `3M`.
 - **`board/CMakeLists.txt`**: your source files, `REQUIRES board_api`, and in
   `PRIV_REQUIRES` the drivers you use (`esp_lcd`, `esp_driver_spi`, `esp_driver_i2c`, ...).
@@ -177,6 +182,7 @@ Pick by panel type and memory:
 |---|---|
 | A panel with an `esp_lcd` driver | Render in strips (`LV_DISPLAY_RENDER_MODE_PARTIAL`, a small DMA buffer) and send each with `esp_lcd_panel_draw_bitmap()`. Most SPI panels read RGB565 big-endian: `lv_draw_sw_rgb565_swap()` the strip first. The ES3C28P's `display.c` is the plainest example; the C6's adds software rotation. |
 | A controller with no driver, or a 1-bit panel | Keep a frame buffer in the panel's own format. In the flush callback, convert LVGL's RGB565 pixels into it, and send the whole frame on the last flush (`lv_display_flush_is_last()`). The RLCD's `display.c` is this case. |
+| An e-paper panel | A refresh takes the panel hundreds of milliseconds, and a full one flashes. Hand frames to a task of your own that skips a frame identical to the one on the glass, shows changes as partial refreshes, and does a full refresh at start-up and now and then to clear ghosting. Set `BOARD_UI_MIN_REFRESH_MS`. The Elecrow's `display.c` is this case. |
 | A backlight | Keep it off until the first real frame has gone out, so the panel's power-on garbage never shows. |
 | No PSRAM | Keep the draw buffers small (1/10 of the screen or less), in internal DMA-capable RAM. |
 
@@ -184,9 +190,13 @@ Rotation:
 
 - On a square panel, all three rotations are layouts of the same canvas: rotate the
   pixels in the flush callback, or with the panel's own mirror and swap bits.
-- On a rectangular panel, the UI is laid out landscape or portrait, not both.
+- On a rectangular panel, the UI is usually laid out landscape or portrait, not both.
   Support the two rotations that keep that shape, and return `ESP_ERR_NOT_SUPPORTED`
   for the third. The saved default is `cw`, so make `cw` work.
+- A rectangular panel can offer both shapes instead, one rotation each, as the e-paper
+  does (`cw` wide, `ccw` tall). Give `ui.c` a layout for each, and have
+  `display_set_rotation()` change LVGL's resolution (`lv_display_set_resolution()`) when
+  the shape changes: the console then lays the UI out again (`ui_rebuild()`).
 
 For a black-and-white panel, threshold each pixel on brightness
 (`r*77 + g*150 + b*29`). The mono theme only draws black and white, so the threshold
@@ -194,17 +204,22 @@ only meets anti-aliased edges. Don't dither: dithering makes small text fuzzy.
 
 ### 6. Add a UI layout, if your screen is a new size
 
-`firmware/main/ui.c` has one `layout_t` per canvas size, picked at compile time:
+`firmware/main/ui.c` has a table of layouts for each board size, picked at compile
+time; at run time the UI takes the one whose `.w`/`.h` match the canvas (a board with
+two shapes has two):
 
 ```c
 #if BOARD_UI_W == 480 && BOARD_UI_H == 480
-static const layout_t L = { ... };
-#elif BOARD_UI_W == 400 && BOARD_UI_H == 300
-static const layout_t L = { ... };
+static const layout_t LAYOUTS[] = {{ .w = 480, .h = 480, ... }};
+#elif BOARD_UI_W == 792 && BOARD_UI_H == 272
+static const layout_t LAYOUTS[] = {{ .w = 792, .h = 272, ... }, { .w = 272, .h = 792, ... }};
 #else
 #error "no UI layout for this board's BOARD_UI_W x BOARD_UI_H: add one"
 #endif
 ```
+
+Each ring and each tile has its own position (`ring_cx[]`/`ring_cy[]`, `tile_x[]`/`tile_y[]`),
+so a layout can put them in a row or stack them.
 
 Copy the closest one, add an `#elif` for your size, and scale the positions. Every
 board has Montserrat 14, 16, 28 and 48. A small screen may need a size in between
@@ -258,8 +273,10 @@ why the photo is on the list.
   `main.c` restarts the CPU once at every power-on, on every board. That reset keeps
   the USB device, so the host doesn't lose the port. Test cold plug-in anyway: your
   chip may have its own quirks.
-- **The console needs the USB-Serial/JTAG port.** If `sdkconfig.defaults` moves the
-  console to a UART, the board still boots, but the agent and tools never find it.
+- **The console must be where the agent looks**: the chip's own USB-Serial/JTAG, or
+  UART0 at 921600 behind a USB-UART bridge. Anywhere else (UART1, or a UART at the default
+  115200), the board boots but the agent and tools never get an answer.
+  `tools/check_boards.py` checks this.
 - **Big screenshots.** A full-screen `shot` is several hundred KB of console text. The
   shared code yields every 64 lines so the task watchdog doesn't fire; don't add long
   busy loops to your flush callback.

@@ -43,23 +43,29 @@ releases.
 | [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm) | **Recommended.** 2.16" 480×480 color AMOLED. The reference board: everything here is shown and tested on it. |
 | [LCDWiki 2.8inch ESP32-S3 Display](https://www.lcdwiki.com/2.8inch_ESP32-S3_Display) (ES3C28P) | 2.8" 240×320 color IPS TFT, landscape. A cheap, common board; same features in a compact layout. |
 | [Waveshare ESP32-S3-RLCD-4.2](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) | 4.2" black-and-white reflective LCD, landscape, no backlight. Same features in a bold mono layout. |
+| [Elecrow CrowPanel ESP32 5.79" E-Paper](https://www.elecrow.com/crowpanel-esp32-5-79-e-paper-hmi-display-with-272-792-resolution-black-white-color-driven-by-spi-interface.html) | 5.79" 792×272 black-and-white e-paper: wide, or tall to stand on its end. Updates every 10 s without flashing; a state change shows at once. |
 
 <p>
   <img src="assets/boards/waveshare-esp32c6-amoled-2.16.png" alt="C6 AMOLED demo screen, 480x480" height="200">
   <img src="assets/boards/lcdwiki-esp32s3-tft-2.8.png" alt="ES3C28P demo screen, 320x240 color" height="200">
   <img src="assets/boards/waveshare-esp32s3-rlcd-4.2.png" alt="RLCD-4.2 demo screen, 400x300 black and white" height="200">
 </p>
+<p>
+  <img src="assets/boards/elecrow-esp32s3-epaper-5.79.png" alt="Elecrow e-paper demo screen, 792x272 black and white" height="160">
+  <img src="assets/boards/elecrow-esp32s3-epaper-5.79-tall.png" alt="Elecrow e-paper demo screen, tall, 272x792" height="160">
+</p>
 
-The same demo data on each board (`tools/devctl.py demoshot`; the RLCD's is what its
-1-bit panel shows).
+The same demo data on each board (`tools/devctl.py demoshot`; the RLCD's and the
+e-paper's are what their 1-bit panels show).
 
 The installer recognizes the board from its firmware or its chip and flashes the right
-image. Both S3 boards have the same chip, so a brand-new S3 board needs its id once:
-`sudo ./install.sh --board lcdwiki-esp32s3-tft-2.8` or
-`sudo ./install.sh --board waveshare-esp32s3-rlcd-4.2`.
+image. The S3 boards share a chip, so a brand-new S3 board needs its id once:
+`sudo ./install.sh --board lcdwiki-esp32s3-tft-2.8`,
+`--board waveshare-esp32s3-rlcd-4.2` or `--board elecrow-esp32s3-epaper-5.79`. To stand
+the e-paper on its short end (tall, USB-C on the right), add `--rotation ccw`.
 
-**Your board isn't here?** If it has an ESP32-C3, C5, C6 or S3 with native USB and a
-screen LVGL can drive, it can probably be ported: `tools/new_board.py` starts one from
+**Your board isn't here?** If it has an ESP32-C3, C5, C6 or S3 with native USB (or a
+CH340 or CP210x USB-UART bridge) and a screen LVGL can drive, it can probably be ported: `tools/new_board.py` starts one from
 the closest board above, and
 [docs/adding-a-device.md](docs/adding-a-device.md) walks through the rest. To get it
 into this repo, see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-device).
@@ -110,7 +116,8 @@ sudo ./install.sh --ssids "HomeNet"           # join Wi-Fi; password prompted, h
 sudo ./install.sh --ssids "HomeNet,HomeNet-IoT"   # several, tried in order (max 4)
 sudo ./install.sh --host 192.168.1.50         # what the board polls over Wi-Fi
 sudo ./install.sh --rotation ccw              # none | ccw | cw (default cw: the board's upright
-                                              # position; landscape-only boards take ccw or cw)
+                                              # position; landscape-only boards take ccw or cw;
+                                              # the e-paper: cw wide, ccw tall)
 sudo ./install.sh --clear-wifi                # forget Wi-Fi; USB keeps working
 ```
 
@@ -244,6 +251,12 @@ SparkESP32 is a small layer on top of a lot of other people's work. Thank you to
   publishing schematics, pin tables and example code for their boards, and the
   [Zephyr Project](https://github.com/zephyrproject-rtos/zephyr/tree/main/boards/waveshare/esp32s3_rlcd_4_2)
   for its RLCD-4.2 board definition.
+- [Elecrow](https://github.com/Elecrow-RD/CrowPanel-ESP32-5.79-E-paper-HMI-Display-with-272-792)
+  for the e-paper board's schematic and factory source,
+  [Sam Perkins](https://github.com/samperk1/esphome-crowpanel-579) for his ESPHome driver
+  for it, whose work on the two-controller seam saved hours, and Jean-Marc Zingg's
+  [GxEPD2](https://github.com/ZinggJM/GxEPD2), whose driver for the same panel the refresh
+  sequences were checked against.
 - The reporters of [espressif/esp-idf#17432](https://github.com/espressif/esp-idf/issues/17432),
   whose analysis of the ESP32-C6 USB start-up bug made the workaround possible.
 
