@@ -97,5 +97,13 @@ On the real board, 2026-11-22 (firmware 1.2.0 + this port, ESP-IDF 5.5.6), drive
 - five chip resets in a row (EN through the CH340, which also cuts the panel's power
   switch): the handshake answered after 4.7 s each time
 
-Not yet: a true cold plug-in (the bridge itself re-enumerating), and the installer and
-agent on a Spark.
+On a DGX Spark (DGX OS), the same day, with this branch's installer and agent:
+
+- plugged in cold (the CH340 enumerating from scratch), the board came up and the
+  installer found it on `/dev/ttyUSB0`, left its firmware alone and set `--rotation ccw`
+- the agent streams to it (`/healthz`: `streaming`, protocol v2) and got its handshake
+  answer at once (0.0 s), so opening the port on Linux doesn't reset the board either
+- ModemManager, active on DGX OS, ignores the bridge (`ID_MM_DEVICE_IGNORE=1` from the
+  udev rule)
+
+Not yet: repeated cold plug-ins on the Spark (one so far).
