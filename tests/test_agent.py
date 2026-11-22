@@ -578,6 +578,16 @@ class LinkTest(unittest.TestCase):
             devctl.parse_shot(link.raw("shot", timeout=2))
         self.assertEqual(str(e.exception), "ERR lock")
 
+    def test_a_damaged_base64_line_is_retried_like_a_bad_crc(self):
+        data = bytes(range(16))
+        crc = format(zlib.crc32(data), "08x")
+        line = base64.b64encode(data).decode()
+        damaged = line[:-3] + "A"
+        raw = "\r\n".join(["SHOT-BEGIN 4 2 rgb565", f"AREA 0 0 3 1 16 {crc}", damaged, "SHOT-END", ""])
+        with self.assertRaises(sparklink.LinkError) as e:     # not binascii.Error: shot() retries LinkErrors
+            devctl.parse_shot(raw.encode())
+        self.assertIn("damaged", str(e.exception))
+
     def test_verdict_split_across_reads_is_read_whole(self):
         link = sparklink.Link.__new__(sparklink.Link)
         link.port = "/dev/fake"

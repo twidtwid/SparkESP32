@@ -14,6 +14,7 @@ more boards show the two usual ways to drive a panel:
 |---|---|---|
 | [LCDWiki ES3C28P](../firmware/boards/lcdwiki-esp32s3-tft-2.8) | The common case: a color SPI TFT (ILI9341V) with a backlight, driven by Espressif's `esp_lcd_ili9341` component. Start here. | Verified on hardware |
 | [Waveshare ESP32-S3-RLCD-4.2](../firmware/boards/waveshare-esp32s3-rlcd-4.2) | A panel with no `esp_lcd` driver: a hand-written ST7306 driver for a 1-bit reflective LCD, and a mono theme. | Verified on hardware |
+| [Elecrow CrowPanel 4.2" E-Paper](../firmware/boards/elecrow-esp32s3-epaper-4.2) | The same e-paper task on another controller family (UltraChip style), which sleeps between refreshes; and a vendor with two hardware versions under one name, told apart by the factory image. | Verified on hardware |
 | [Elecrow CrowPanel 5.79" E-Paper](../firmware/boards/elecrow-esp32s3-epaper-5.79) | E-paper: two cascaded SSD1683 controllers, partial refreshes at a slower cadence, a wide and a tall canvas, and a USB-UART bridge (CH340) instead of the chip's own USB. | Verified on hardware |
 
 AI agents: [AGENTS.md](../AGENTS.md#adding-a-new-device) has the same steps as a checklist.
@@ -24,7 +25,7 @@ To submit a board, see [CONTRIBUTING.md](../CONTRIBUTING.md#adding-a-new-device)
 | Need | Why |
 |---|---|
 | An **ESP32-C3, C5, C6 or S3** (Wi-Fi) | The chips SparkESP32 builds for, all with a native USB-Serial/JTAG controller. The original ESP32 and the S2 aren't supported. |
-| The board's USB-C port wired to the **chip's own USB pins**, or to a **CH340, CH343, CH9102 or CP210x** USB-UART bridge | The agent finds the display by USB ID: `303a:1001` for the chip's own USB, or one of those bridges. Plug the board in and run `python3 -m serial.tools.list_ports -v`. Behind a bridge, the console runs on UART0 at 921600 (the Elecrow e-paper shows how). |
+| The board's USB-C port wired to the **chip's own USB pins**, or to a **CH340, CH343, CH9102 or CP210x** USB-UART bridge | The agent finds the display by USB ID: `303a:1001` for the chip's own USB, or one of those bridges. Plug the board in and run `python3 -m serial.tools.list_ports -v`. Behind a bridge, the console runs on UART0 at its default 115200 (the Elecrow e-papers show how). |
 | **8 MB flash** or more | The app is about 1.7 MB and the default partition table has a 6 MB app slot. A 4 MB board works with a smaller slot in its own `partitions.csv`. |
 | A display LVGL 9 can drive, roughly 300 px or more on each side | Smaller screens need a new UI layout, and very small ones may not fit the content. |
 
@@ -153,9 +154,8 @@ writes one), replaces the README with a skeleton, and lists the board in
 - **`board/include/board_config.h`**: the UI size and the mono flag.
 - **`sdkconfig.defaults`**: the flash size, and PSRAM if any (remove the copied PSRAM
   lines if your board has none). Keep `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`, or, if the
-  board's USB goes through a USB-UART bridge, put the console on UART0 at 921600 (copy
-  the e-paper's `CONFIG_ESP_CONSOLE_UART_*` lines: only a "custom" UART console takes a
-  baud rate other than 115200).
+  board's USB goes through a USB-UART bridge, `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` (UART0 at
+  115200).
 - **`partitions.csv`**: the shared layout fits 8 MB and up. For 4 MB, shrink the app slot to `3M`.
 - **`board/CMakeLists.txt`**: your source files, `REQUIRES board_api`, and in
   `PRIV_REQUIRES` the drivers you use (`esp_lcd`, `esp_driver_spi`, `esp_driver_i2c`, ...).
@@ -274,8 +274,8 @@ why the photo is on the list.
   the USB device, so the host doesn't lose the port. Test cold plug-in anyway: your
   chip may have its own quirks.
 - **The console must be where the agent looks**: the chip's own USB-Serial/JTAG, or
-  UART0 at 921600 behind a USB-UART bridge. Anywhere else (UART1, or a UART at the default
-  115200), the board boots but the agent and tools never get an answer.
+  UART0 at its default 115200 behind a USB-UART bridge. Anywhere else (UART1, another
+  rate), the board boots but the agent and tools never get an answer.
   `tools/check_boards.py` checks this.
 - **Big screenshots.** A full-screen `shot` is several hundred KB of console text. The
   shared code yields every 64 lines so the task watchdog doesn't fire; don't add long

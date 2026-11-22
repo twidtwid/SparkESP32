@@ -18,7 +18,7 @@ The demo screen at load 70, wide, as the 1-bit panel shows it: LVGL's render thr
 |---|---|
 | Chip | ESP32-S3 (S3R8): 8 MB flash, 8 MB octal PSRAM |
 | Display | 5.79" 792×272 e-paper (DIS08792E), black and white, two SSD1683 controllers in cascade, SPI (10 MHz) |
-| USB | a CH340 USB-UART bridge (1a86:7523) to UART0: the console and the agent's USB feed, at 921600 baud |
+| USB | a CH340 USB-UART bridge (1a86:7523) to UART0: the console and the agent's USB feed, at 115200 baud |
 | Unused | the rotary switch and HOME/EXIT keys, the microSD slot, the battery connector, the 2×10 header |
 
 ## Pins
@@ -58,9 +58,10 @@ The demo screen at load 70, wide, as the 1-bit panel shows it: LVGL's render thr
   none` answers `ERR rot none not supported on this board`. A rotation changes the
   canvas's shape, so the shared UI lays itself out again.
 - **The USB-UART bridge.** The USB-C port is wired to a CH340, not to the ESP32-S3's own
-  USB, so the console runs on UART0 at 921600 (a screenshot takes about 7 s). The agent
-  and the host tools look for CH340 and CP210x bridges as well as the native USB ID, and
-  open every port at 921600 (native USB ignores the rate). Opening the port doesn't reset
+  USB, so the console runs on UART0 at its default 115200 (a screenshot takes about 50 s;
+  1.3.0 used 921600, which lost data on Linux's CH340 driver). The agent and the host tools
+  look for CH340 and CP210x bridges as well as the native USB ID, and open every port at
+  115200 (native USB ignores the rate). Opening the port doesn't reset
   the board.
 - **E-paper keeps its image unpowered.** If the board loses power, the last screen stays,
   ONLINE and all. The red power LED is lit whenever the firmware runs: no LED, no live data.

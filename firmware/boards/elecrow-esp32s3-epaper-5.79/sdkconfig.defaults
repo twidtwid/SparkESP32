@@ -8,14 +8,9 @@ CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 
 # The USB-C port goes through a CH340 USB-UART bridge to UART0, not to the chip's own
-# USB, so the console (the agent's USB transport) is UART0, on its usual pins, at the
-# 921600 baud the agent and tools open: a screenshot (~575 KB of base64) takes about
-# 7 s. Only a "custom" UART console takes a baud rate other than 115200.
-CONFIG_ESP_CONSOLE_UART_CUSTOM=y
-CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y
-CONFIG_ESP_CONSOLE_UART_TX_GPIO=43
-CONFIG_ESP_CONSOLE_UART_RX_GPIO=44
-CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
+# USB, so the console (the agent's USB transport) is UART0 at its default 115200 baud.
+# Faster (921600) lost data on Linux's CH340 driver; the feed needs ~200 bytes a second.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # the wide layout's ring values and readouts

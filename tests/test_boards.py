@@ -67,17 +67,18 @@ class CheckBoards(unittest.TestCase):
         (self.root / "assets" / "boards" / f"{TFT}.png").unlink()
         self.assertIn(f"assets/boards/{TFT}.png", self.problems())
 
-    def test_console_on_native_usb_or_a_uart_at_the_tools_rate(self):
+    def test_console_on_native_usb_or_the_default_uart(self):
         sdk = self.d / "sdkconfig.defaults"
         native = sdk.read_text()
+        sdk.write_text(native.replace("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y", "CONFIG_ESP_CONSOLE_NONE=y"))
+        self.assertIn("the console on", self.problems())
+        sdk.write_text(native.replace("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",       # UART1, custom pins
+                                      "CONFIG_ESP_CONSOLE_UART_CUSTOM=y\nCONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_1=y"))
+        self.assertIn("the console on", self.problems())
+        bridge = (self.root / "firmware" / "boards" / EPD / "sdkconfig.defaults").read_text()
+        self.assertIn("CONFIG_ESP_CONSOLE_UART_DEFAULT=y", bridge)
         sdk.write_text(native.replace("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
                                       "CONFIG_ESP_CONSOLE_UART_DEFAULT=y"))
-        self.assertIn("the console on", self.problems())          # UART, but at the default 115200
-        bridge = (self.root / "firmware" / "boards" / EPD / "sdkconfig.defaults").read_text()
-        self.assertIn("CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600", bridge)
-        sdk.write_text(native.replace("CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y",
-                                      "CONFIG_ESP_CONSOLE_UART_CUSTOM=y\nCONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y\n"
-                                      "CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600"))
         self.assertNotIn("the console on", self.problems())
 
     def test_needs_a_layout_for_its_size(self):

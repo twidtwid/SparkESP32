@@ -146,7 +146,7 @@ This is the order to work in and what to prove at each step.
 
 1. **Confirm the board can work** before writing code: an ESP32-C3/C5/C6/S3 (Wi-Fi),
    USB wired to the chip (`VID:PID=303A:1001` in `python3 -m serial.tools.list_ports -v`)
-   or to a CH340/CH343/CH9102/CP210x bridge (then the console goes on UART0 at 921600,
+   or to a CH340/CH343/CH9102/CP210x bridge (then the console goes on UART0 at 115200,
    as the Elecrow e-paper's does), 8 MB+ flash. If any of these fail, stop and
    tell the human why.
 2. **Back up the factory flash** (`esptool read_flash 0 <flash size> factory.bin`) to a

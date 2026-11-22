@@ -57,7 +57,7 @@ BRIDGE_IDS = {(0x1A86, 0x7523),       # WCH CH340
               (0x1A86, 0x55D3),       # WCH CH343
               (0x1A86, 0x55D4),       # WCH CH9102
               (0x10C4, 0xEA60)}       # Silicon Labs CP210x
-BAUD = 921600                         # native USB ignores it; a board behind a bridge runs its console at it
+BAUD = 115200                         # native USB ignores it; a board behind a bridge runs its console at it
 HANDSHAKE = b"fw=sparkesp32"
 REJECT_S = 300.0                      # a native port that fails the handshake is skipped this long;
                                       # a bridge, until it's replugged: it may be some other gadget

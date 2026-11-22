@@ -25,7 +25,7 @@ can talk to the display's serial port at a time.
 
 - Try another cable. Many USB-C cables are charge-only, and the board needs data to be
   flashed and fed (it powers up on either).
-- `lsusb | grep 303a:1001` on the Spark (the Elecrow e-paper shows up as a CH340:
+- `lsusb | grep 303a:1001` on the Spark (the Elecrow e-papers show up as a CH340:
   `lsusb | grep 1a86:7523`). If it's missing, the board isn't enumerating: check the
   cable and the port, then `dmesg | tail`.
 - A brand-new board runs Waveshare's demo firmware until you install. Run `sudo ./install.sh`.
@@ -189,23 +189,27 @@ position: on the C6 AMOLED and the ES3C28P, USB-C on the right; on the RLCD, sit
 on its stand. A
 board with a rectangular screen is laid out for one shape and
 takes only the two rotations that keep it: the S3 boards are landscape, `ccw` or `cw`,
-and answer `ERR rot none not supported on this board` to the third. The e-paper takes
-`cw` (wide) and `ccw` (tall) and refuses `none`.
+and answer `ERR rot none not supported on this board` to the third. The 5.79" e-paper
+takes `cw` (wide) and `ccw` (tall) and refuses `none`; the 4.2" e-paper is landscape,
+`cw` or `ccw`.
 
 ## The e-paper
 
-The Elecrow e-paper behaves differently from the lit screens, by design:
+The Elecrow e-papers (5.79" and 4.2") behave differently from the lit screens, by design:
 
 - **New readings show every 10 s**, not every second. Each update is a partial refresh:
   only the pixels that change are redrawn, with no flash. A change of state (ONLINE to
   OFFLINE, CLOCK STUCK) shows at once.
-- **About once an hour the whole screen flashes black and white** for 2 seconds. That's
+- **About once an hour the whole screen flashes black and white** for a second or two. That's
   the full refresh that wipes the faint ghosts partial refreshes leave. It also happens
   at start-up and after a rotation.
 - **It shows ONLINE with old numbers when the board has no power.** E-paper keeps its
   image unpowered. The red LED is lit while the firmware runs: no LED, no live data.
-- **Tall or wide**: `sudo ./install.sh --rotation ccw` stands it on its short end with the
-  USB-C port on the right; `--rotation cw` is wide.
+- **Tall or wide** (5.79"): `sudo ./install.sh --rotation ccw` stands it on its short end
+  with the USB-C port on the right; `--rotation cw` is wide.
+- **A 4.2" that stays blank or never finishes a refresh** is probably the V1.0 board (no
+  green sticker on the back, an SSD1683 controller), which this firmware doesn't drive.
+  Restore its factory flash (`esptool write_flash 0x0 <backup>`).
 - `/healthz` → `"display"` → `"state": "rejected"` with `"retry_in_s": null`: the agent
   asked a USB-UART bridge whether it's a SparkESP32 and got no answer, so it leaves that
   device alone until it's replugged. Unplug and replug the board, or check it runs
@@ -219,8 +223,8 @@ The Elecrow e-paper behaves differently from the lit screens, by design:
   (`/dev/ttyACMn`, or `/dev/ttyUSBn` for a board behind a USB-UART bridge).
 - `... is a USB-UART bridge that doesn't answer as a SparkESP32: leaving it alone`: a
   CH340/CP210x device is plugged in but isn't running SparkESP32. If it's a new display
-  (the Elecrow e-paper), name it so the installer flashes it:
-  `sudo ./install.sh --board elecrow-esp32s3-epaper-5.79`.
+  (an Elecrow e-paper), name it so the installer flashes it:
+  `sudo ./install.sh --board elecrow-esp32s3-epaper-5.79` (or `elecrow-esp32s3-epaper-4.2`).
 - `couldn't identify the board` or `pick its board with --board`: the board isn't running
   SparkESP32 yet and its chip matches more than one supported board, or none. Name it:
   `sudo ./install.sh --board <id>` (`./install.sh --help` lists the ids).

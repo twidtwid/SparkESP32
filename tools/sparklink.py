@@ -24,7 +24,7 @@ BRIDGE_IDS = {(0x1A86, 0x7523),              # WCH CH340
               (0x1A86, 0x55D3),              # WCH CH343
               (0x1A86, 0x55D4),              # WCH CH9102
               (0x10C4, 0xEA60)}              # Silicon Labs CP210x
-BAUD = 921600       # native USB ignores it; a board behind a bridge runs its console at this rate
+BAUD = 115200       # native USB ignores it; a board behind a bridge runs its console at this rate
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 ESP_LOG = re.compile(r"[EWIDV] \(\d+\) ")   # "I (4378) tag: ...": the board logging, never a reply
 PROMPT = "spark>"

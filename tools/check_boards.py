@@ -55,14 +55,13 @@ def check(board, root=ROOT):
     if want not in sdk:
         problems.append(f"sdkconfig.defaults: {want}")
     # The console is the agent's USB transport: the chip's own USB-Serial/JTAG, or for a
-    # board whose USB port is a USB-UART bridge, UART0 at the rate the agent and tools open.
+    # board whose USB port is a USB-UART bridge, UART0 at its default 115200 (the rate the
+    # agent and tools open).
     usj = "CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y" in sdk
-    uart = ("CONFIG_ESP_CONSOLE_UART_CUSTOM=y" in sdk and "CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y" in sdk
-            and "CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600" in sdk)
+    uart = "CONFIG_ESP_CONSOLE_UART_DEFAULT=y" in sdk
     if not (usj or uart):
         problems.append("sdkconfig.defaults: the console on CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y, or, "
-                        "behind a USB-UART bridge, on UART0 at 921600 (CONFIG_ESP_CONSOLE_UART_CUSTOM=y, "
-                        "CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_0=y, CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600); "
+                        "behind a USB-UART bridge, CONFIG_ESP_CONSOLE_UART_DEFAULT=y (UART0 at 115200); "
                         "see docs/adding-a-device.md")
 
     cmake = (d / "board/CMakeLists.txt").read_text()

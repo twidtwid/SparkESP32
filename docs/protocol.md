@@ -97,7 +97,7 @@ Most boards enumerate as an Espressif USB-Serial/JTAG device, **VID:PID `303a:10
 (`/dev/ttyACM*` on Linux, `/dev/cu.usbmodem*` on macOS). A board whose USB port is a
 USB-UART bridge enumerates as the bridge: CH340 `1a86:7523`, CH343 `1a86:55d3`, CH9102
 `1a86:55d4` or CP210x `10c4:ea60` (`/dev/ttyUSB*`, `/dev/cu.usbserial-*`), with its
-console on UART0. Hosts open every port at **921600** baud: a bridge needs it, and USB
+console on UART0. Hosts open every port at **115200** baud: a bridge needs it, and USB
 CDC ignores it. The agent tries native ports first. A bridge that doesn't answer the
 handshake below is left alone until it's unplugged, since it may be some other gadget.
 

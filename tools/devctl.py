@@ -17,6 +17,7 @@ CH340/CP210x USB-UART bridge).
 """
 import argparse
 import base64
+import binascii
 import os
 import re
 import sys
@@ -52,7 +53,10 @@ def parse_shot(raw):
         x1, y1, x2, y2, nbytes = map(int, m.groups()[:5])
         data = bytearray()
         while i < len(lines) and len(data) < nbytes and B64.fullmatch(lines[i].strip() or "!"):
-            data += base64.b64decode(lines[i].strip())
+            try:
+                data += base64.b64decode(lines[i].strip())
+            except binascii.Error:      # a line damaged on the wire: the same as a bad CRC
+                raise LinkError(f"strip at {x1},{y1} has a damaged line") from None
             i += 1
         if len(data) != nbytes or format(zlib.crc32(bytes(data)), "08x") != m.group(6):
             raise LinkError(f"strip at {x1},{y1} failed its size/CRC check")

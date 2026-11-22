@@ -1,0 +1,14 @@
+# elecrow-esp32s3-epaper-4.2: chip, flash and PSRAM for this board
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/elecrow-esp32s3-epaper-4.2/partitions.csv"
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# The USB-C port goes through a CH340 USB-UART bridge to UART0, not to the chip's own
+# USB, so the console (the agent's USB transport) is UART0 at its default 115200 baud.
+# Faster (921600) lost data on Linux's CH340 driver; the feed needs ~200 bytes a second.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

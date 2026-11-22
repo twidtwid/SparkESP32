@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+
+- A fifth board: the Elecrow CrowPanel ESP32 4.2" E-Paper, V1.2 (`elecrow-esp32s3-epaper-4.2`,
+  the version with a green circular sticker on the back), a 400×300 black-and-white e-paper
+  with an UltraChip-style controller. The same refresh policy as the 5.79": partial
+  refreshes with no flash at most every 10 s, a full refresh once an hour. The older V1.0
+  board (an SSD1683, no sticker) isn't supported.
+
+### Changed
+
+- Boards behind a USB-UART bridge (the Elecrow e-papers) run their console at the default
+  115200 baud instead of 921600, and the agent and tools open ports at 115200. At 921600,
+  Linux's CH340 driver damaged about 1 in 5 full-screen screenshots; the stat feed needs
+  about 200 bytes a second. A 5.79" e-paper still on 1.3.0 doesn't answer at the new rate:
+  upgrade it once with `sudo ./install.sh --board elecrow-esp32s3-epaper-5.79`.
+
+### Fixed
+
+- `devctl.py shot` retries a screenshot with a line damaged on the wire, as it does one with
+  a bad CRC, instead of stopping with a base64 error.
+
 ## 1.3.0 — 2026-11-22
 
 ### Added
