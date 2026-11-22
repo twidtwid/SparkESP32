@@ -159,6 +159,28 @@ the agent to read Sparkline's samples. `/healthz` shows which source is live:
 
 To sample on the Spark without Sparkline, run `sudo ./install.sh --no-sparkline`.
 
+## A model won't load, but the panel shows free memory
+
+The MEM ring counts used memory as `MemTotal − MemAvailable` from `/proc/meminfo`, the same
+estimate of allocatable memory that NVIDIA recommends for DGX Spark. `MemAvailable` includes
+page cache the kernel can reclaim (for example, model files you read recently), so on a
+busy Spark much of what the panel shows as free can be cache.
+
+Some applications size themselves with CUDA's `cudaMemGetInfo` instead. On the Spark's
+unified memory it can report less than the system could actually allocate, because it
+doesn't count memory the CPU could reclaim, and an application that trusts it can refuse a
+load the Spark has room for. NVIDIA's
+[known issues](https://docs.nvidia.com/dgx/dgx-spark/known-issues.html#guidance-for-reporting-memory-resources-with-unified-memory-architecture)
+give a workaround for debugging: flush the page cache, then restart the application.
+
+```bash
+grep -E '^(MemFree|MemAvailable|Cached):' /proc/meminfo   # how much of "available" is cache
+sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'      # flush it, then restart the app
+```
+
+The panel keeps no history, so it can't tell you after the fact what memory looked like
+when a load failed.
+
 ## The image is sideways
 
 `sudo ./install.sh --rotation none|ccw|cw`. The default `cw` is the board's upright
