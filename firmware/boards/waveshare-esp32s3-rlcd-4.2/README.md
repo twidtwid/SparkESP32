@@ -57,7 +57,12 @@ On the real board, 2026-11-21 (firmware 0.1.0, ESP-IDF 5.5.6), driven from a Mac
   with live values
 - a reflash keeps the name and Wi-Fi settings
 
-Not yet: a cold plug-in, and the installer on a Spark.
+On a DGX Spark, 2026-11-22: `install.sh` upgraded it from 0.1.0 to 1.4.0 from the public
+release (the board named itself in the handshake), kept its Wi-Fi settings, and the agent
+streams to it with protocol v2, so it shows the GPU clock. The screenshot above is from that
+firmware, taken on the Spark.
+
+Not yet: a cold plug-in.
 
 The first board tested as "the RLCD" was an ES3C28P from a swapped box (now
 [its own port](../lcdwiki-esp32s3-tft-2.8/)). Its handshake, screenshots and Wi-Fi all
