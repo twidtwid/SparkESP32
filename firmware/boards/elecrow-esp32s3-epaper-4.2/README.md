@@ -101,4 +101,5 @@ On the Spark, with this branch's installer and agent: the installer found the bo
 `/dev/ttyUSB0`, left its firmware alone and set up Wi-Fi; the agent streams to it (protocol
 v2) and got its handshake at once, so opening the port doesn't reset it.
 
-Not yet: the board reading ONLINE · via WI-FI on its own (Wi-Fi is configured).
+On Wi-Fi alone (unplugged from the Spark, on a USB charger): it joins, polls the Spark's
+agent and reads ONLINE · via WI-FI with live values (photographed).
