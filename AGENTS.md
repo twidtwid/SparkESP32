@@ -110,6 +110,7 @@ firmware/                  ESP-IDF 5.5 project; the board picks the chip
 tests/                     host tests: agent + tools, boards + installer detection (Python);
                            parser and state machines (C)
 assets/boards/<id>.png     each board's demo screenshot
+hardware/                  spark-display-mount.3mf: printable C6 mount for the top of a Spark
 docs/                      protocol.md, troubleshooting.md, adding-a-device.md
 ```
 

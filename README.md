@@ -73,6 +73,17 @@ the closest board above, and
 [docs/adding-a-device.md](docs/adding-a-device.md) walks through the rest. To get it
 into this repo, see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-device).
 
+### A mount for the Spark
+
+<img src="assets/mount.jpg" alt="The C6 AMOLED in a printed mount on top of a DGX Spark standing on its side" width="360">
+
+[`hardware/spark-display-mount.3mf`](hardware/spark-display-mount.3mf) is a printable
+mount for the C6 AMOLED. It caps the top of a Spark standing on its side and holds the
+board upright, with the USB-C cable routed through it. It's one part, about
+150 × 90 × 49 mm; the one in the photo is matte PLA. The file holds only the model, so
+use your own slicer settings. In the mount, set `sudo ./install.sh --rotation none` so
+the screen reads upright.
+
 ## Quick start (on the Spark)
 
 ```bash
