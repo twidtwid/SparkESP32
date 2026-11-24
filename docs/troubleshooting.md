@@ -59,7 +59,7 @@ The link is up but samples stopped. The screen's second line says why (over Wi-F
 | Second line | Meaning | Fix |
 |---|---|---|
 | agent stopped | the Spark refused the connection: nothing listens on :8787 | `systemctl status sparkesp32`; `sudo systemctl restart sparkesp32` |
-| Spark unreachable | no answer, or `<host>.local` doesn't resolve | is the Spark on? Same LAN? Try `--host <ip>`; is ufw allowing your subnet? |
+| Spark unreachable | no answer, or `<host>.local` doesn't resolve | is the Spark on? Same LAN? Try `--host <ip>`; is the display's Wi-Fi on another subnet than the Spark? Then `sudo ./install.sh --lan <its subnet>` |
 | agent stale | HTTP 503: the agent is up but its sampler stalled | `journalctl -u sparkesp32` |
 | bad reply | another service answers, or an old agent | check the URL (`devctl.py wifi`); update the agent |
 
@@ -69,7 +69,7 @@ The link is up but samples stopped. The screen's second line says why (over Wi-F
 
 | `last_err` | Meaning | Fix |
 |---|---|---|
-| `connect ESP_ERR_HTTP_CONNECT` | can't reach the agent | Is `<host>.local` resolvable on your LAN? Try `--host <ip>`. Is ufw allowing your subnet (`sudo ufw status`)? Is the board on an isolated guest/IoT network? |
+| `connect ESP_ERR_HTTP_CONNECT` | can't reach the agent | Is `<host>.local` resolvable on your LAN? Try `--host <ip>`. Is the board on another subnet than the Spark? The agent and the ufw rule (`sudo ufw status`) only let the Spark's own subnet in: `sudo ./install.sh --lan <the board's subnet>`. Is the board on an isolated guest/IoT network? |
 | `http 503` | agent is up but its sampler stalled | `journalctl -u sparkesp32`; `sudo systemctl restart sparkesp32` |
 | `http 404` | something else answers on that port | check the URL: `devctl.py wifi` shows it; fix with `--host` |
 | `bad stat line (too many fields: update the agent)` | the agent speaks an older protocol | `git pull && sudo ./install.sh` on the Spark |
@@ -160,6 +160,8 @@ the agent to read Sparkline's samples. `/healthz` shows which source is live:
   didn't answer, so the agent samples by itself and asks Sparkline again every 30 s.
   `token rejected` means Sparkline's agent token changed: re-run `sudo ./install.sh`.
   A refused connection or a timeout means Sparkline's agent is down or moved.
+  `isn't this host` means the address saved for Sparkline now belongs to another
+  machine, so the agent didn't send it the token: re-run `sudo ./install.sh`.
 
 To sample on the Spark without Sparkline, run `sudo ./install.sh --no-sparkline`.
 

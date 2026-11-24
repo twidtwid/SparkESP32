@@ -27,14 +27,21 @@ timeline will be coordinated based on severity and complexity.
 Things this project deliberately does, so you can judge reports against them:
 
 - The agent's HTTP endpoint is **read-only machine vitals** over plain HTTP
-  on port 8787. The installer limits it to the local subnet when ufw is active,
-  and warns when no firewall is active. It is not meant to be exposed to the internet.
+  on port 8787. The installer limits it to this host and the local subnet (`--lan` for
+  another): in the systemd unit (`IPAddressAllow`), and in ufw when ufw is active. It warns
+  when it can do neither. At most 16 requests are served at once. `/healthz` gives the
+  serial port's path, Sparkline's URL and error texts only to a client on the Spark
+  itself. It is not meant to be exposed to the internet.
 - The Wi-Fi password is stored **unencrypted** in the display's flash (NVS),
   like on most consumer IoT devices. Anyone with physical access to the board
   can read it. It is never printed to the console, logged, or kept in the
   console's command history, and the Wi-Fi driver's own persistent copy is disabled.
-- The agent runs as an unprivileged user under a hardened systemd unit and only
-  writes to a USB device that answers the SparkESP32 firmware handshake.
+- The agent runs as an unprivileged user of its own (systemd's `DynamicUser`, nobody's
+  login account) under a hardened systemd unit and only writes to a USB device that
+  answers the SparkESP32 firmware handshake.
+- On a Spark that runs Sparkline, the agent holds Sparkline's agent token, which opens
+  all of Sparkline's API. It is kept in a root-only file, handed to the service by
+  systemd, and sent only over a connection that ends on the Spark itself.
 
 ## Scope
 

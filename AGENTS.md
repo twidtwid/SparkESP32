@@ -10,7 +10,8 @@ someone, or changing it. Humans: [README.md](README.md) is the friendlier versio
    `tools/provision.py` prompt for it on a hidden TTY prompt; let the human type it. If
    you have no TTY, set up USB-only and tell the human the exact command to run themselves.
 2. **Run the installer on the Spark, with sudo, from the repo root.** It needs root for
-   systemd/udev/ufw, and it runs the agent as the invoking (non-root) user.
+   systemd/udev/ufw. The agent runs as an unprivileged user of its own (systemd's
+   `DynamicUser`), not as root and not as the human.
 3. **Flash split images only** (bootloader, partition table and app, at the offsets in
    the bundle's `flash_args`). The merged image overwrites the NVS partition and the
    board forgets its name and Wi-Fi. The installer and `make flash` already do this right.
@@ -54,8 +55,9 @@ Useful flags: `--host <ip>` when mDNS (`<hostname>.local`) doesn't resolve on th
 `--port /dev/ttyACMn` (or `/dev/ttyUSBn` behind a USB-UART bridge) if several possible
 displays are attached; `--board <id>` if the
 installer can't tell which supported board it is (it asks the firmware, then the chip);
-`--no-flash` to leave the firmware alone; `--lan <cidr>` to override the subnet ufw
-allows; `--no-sparkline` to sample even when a Sparkline agent runs there (by default the
+`--no-flash` to leave the firmware alone; `--lan <cidr>` when the display's Wi-Fi is on
+another subnet than the Spark (the service and the ufw rule let only the Spark's own subnet
+in otherwise); `--no-sparkline` to sample even when a Sparkline agent runs there (by default the
 agent reads Sparkline's samples; its token stays in a root-only file and never goes to the
 display). `./install.sh --help` lists everything.
 
@@ -85,7 +87,7 @@ VERSION                    the one version: firmware (CMake reads it), agent, in
 agent/
   sparkesp32_agent.py      sampler (or a Sparkline agent's readings) + USB push + HTTP
                            /stat,/healthz (stdlib + pyserial)
-  sparkesp32.service       systemd unit template (@RUN_USER@)
+  sparkesp32.service       systemd unit template (@LAN@: the subnets that may reach the agent)
   99-sparkesp32.rules      udev: ModemManager ignores the display's USB IDs (native + bridges)
   requirements.txt         pinned pyserial + esptool for /opt/sparkesp32/venv
 tools/

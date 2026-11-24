@@ -99,7 +99,8 @@ Plug the display into one of the Spark's USB-C ports first. The installer:
    sent live by the agent, unless you pick a name,
 3. offers to set up Wi-Fi. It lists the 2.4 GHz networks the board can see, and you type
    the password at a hidden prompt,
-4. installs the agent as the `sparkesp32` systemd service (runs as you, not root), plus a
+4. installs the agent as the `sparkesp32` systemd service (as an unprivileged user of its own, not root and not you),
+   limited to this Spark and your LAN, plus a
    udev rule that keeps ModemManager off the board (and off other CH340/CP210x adapters: it goes by chip), and a ufw rule allowing your LAN to reach port 8787,
 5. checks the whole thing end to end.
 
@@ -213,7 +214,8 @@ pyserial. The firmware is ESP-IDF 5.5 + LVGL 9.
 **Already running [Sparkline](https://github.com/sfxnz/sparkline)?** The installer notices
 its agent and has ours read Sparkline's samples instead of running `nvidia-smi` a second
 time, so the display and your Sparkline dashboard always show the same numbers. Sparkline's
-token stays on the Spark, readable only by root and the service; it never goes to the
+token stays on the Spark, in a file only root can read; the agent, which runs as a user of
+its own, sends it to this Spark's own address and nowhere else, and it never goes to the
 display. If Sparkline stops answering, the agent samples by itself until it's back.
 `--no-sparkline` turns this off.
 

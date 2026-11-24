@@ -155,12 +155,14 @@ The agent serves, on port 8787 by default:
 |---|---|
 | `GET /stat` | `200`, `text/plain`, the v1 line + `\n`, with `Content-Length`. `503 stale` if the sampler hasn't produced a line in 5 s. |
 | `GET /stat?v=2` | the same, with the v2 line |
-| `GET /healthz` | `200`, JSON: version, sample age, display connection, each value broken out, and where the readings come from (`source`: `own` or `sparkline`) |
+| `GET /healthz` | `200`, JSON: version, sample age, display connection, each value broken out, and where the readings come from (`source`: `own` or `sparkline`). Asked from another machine, `display` and `sparkline` hold only their `state`, and `gpu_error` is left out: the serial port's path, Sparkline's URL and error texts are for the Spark itself (`curl localhost:8787/healthz`). |
 | anything else | `404` |
 
 The board polls `GET /stat` once a second with a 2.5 s timeout. It needs status 200, a
 `Content-Length`, and the full body. Plain `http://` only, LAN only: the payload is
-read-only machine vitals, and the installer's ufw rule only allows the local subnet.
+read-only machine vitals, and the installed service answers only this host and the local
+subnet (`install.sh --lan` for another), as does the installer's ufw rule. The agent serves
+at most 16 requests at once and hangs up on one more.
 
 ## Console commands
 

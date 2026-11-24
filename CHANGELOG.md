@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Security
+
+- Sparkline's agent token, which opens all of Sparkline's API, stays with the service and
+  on the Spark. The service runs as an unprivileged user of its own (systemd's
+  `DynamicUser`) instead of the user who ran `sudo`, whose other programs could read the
+  token from the agent's environment. With Sparkline's `bind = "auto"`, the agent looks up
+  this Spark's address for every request instead of keeping the one from install time, and
+  it sends the token only over a connection that ends on the Spark itself. Before, a new
+  DHCP lease sent the token, in clear text, to whichever machine got the old address.
+- The installer runs every `python` isolated (`-I`). Run from a directory someone else can
+  write to, it imported `json.py`, `venv.py` and the like from there, as root.
+- The agent's HTTP port is limited to the Spark and its subnet by the systemd unit
+  (`IPAddressAllow`), whether or not ufw is active. It serves at most 16 requests at once:
+  about a thousand idle connections used up its file descriptors and stopped the USB feed
+  too. `/stat?v=` with a value `int()` can't read no longer leaves a traceback in the
+  journal. `/healthz` keeps the serial port's path, Sparkline's URL and error texts for
+  requests from the Spark itself.
+
+### Changed
+
+- A display on Wi-Fi in another subnet than the Spark needs `sudo ./install.sh --lan
+  <its subnet>`, also where ufw isn't active. `--lan` adds that subnet for the service
+  (the Spark's own stays, for Sparkline) and replaces it in the ufw rule, and must be a
+  subnet such as `192.168.1.0/24`.
+- `RUN_USER` is gone from the installer: the service no longer runs as a login user.
+
 ## 1.4.1 — 2026-11-22
 
 ### Fixed
