@@ -2,9 +2,12 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 1.4.2 — 2026-11-23
 
 ### Security
+
+Fixes for [GHSA-7jc8-39c8-wwv9](https://github.com/twidtwid/SparkESP32/security/advisories/GHSA-7jc8-39c8-wwv9),
+reported and fixed by [@joeynyc](https://github.com/joeynyc).
 
 - Sparkline's agent token, which opens all of Sparkline's API, stays with the service and
   on the Spark. The service runs as an unprivileged user of its own (systemd's

@@ -46,7 +46,7 @@ try:
 except ImportError:  # HTTP-only mode
     serial = None
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 log = logging.getLogger("sparkesp32")
 
 # The display's USB serial port: the chip's own USB-Serial/JTAG on most boards, or a
