@@ -164,8 +164,9 @@ install -m 0755 "$HERE/agent/sparkesp32_agent.py" "$OPT/sparkesp32_agent.py"
 install -m 0644 "$HERE/tools/sparklink.py" "$OPT/tools/sparklink.py"
 install -m 0755 "$HERE/tools/provision.py" "$HERE/tools/devctl.py" "$OPT/tools/"
 [ -x "$VENV/bin/python" ] || python3 -I -m venv "$VENV"
-"$VENV/bin/python" -I -m pip install --quiet --disable-pip-version-check -r "$HERE/agent/requirements.txt" ||
-    die "pip install failed (needs internet access to PyPI)"
+# every package, down to what esptool pulls in, at the version and with a hash requirements.txt names
+"$VENV/bin/python" -I -m pip install --quiet --disable-pip-version-check --require-hashes \
+    -r "$HERE/agent/requirements.txt" || die "pip install failed (needs internet access to PyPI)"
 PY="$VENV/bin/python"
 devctl() { "$PY" "$OPT/tools/devctl.py" ${PORT:+--port "$PORT"} "$@"; }
 

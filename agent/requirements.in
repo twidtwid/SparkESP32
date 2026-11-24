@@ -1,0 +1,5 @@
+# What install.sh puts into /opt/sparkesp32/venv. requirements.txt is this, resolved for
+# every platform and Python from 3.10, with a hash for each file pip may download:
+#   uv pip compile agent/requirements.in --universal --generate-hashes --python-version 3.10 -o agent/requirements.txt
+pyserial==3.5        # the agent's USB link to the display
+esptool==4.14.0      # flashing (the version ESP-IDF v5.5.6 ships)
