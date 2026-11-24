@@ -14,6 +14,8 @@ DynamicUser=yes
 SupplementaryGroups=dialout
 # written by install.sh only when a Sparkline agent runs here: its URL and token
 EnvironmentFile=-/etc/sparkesp32/sparkline.env
+# written by install.sh once it has seen the display: the one USB device the agent opens
+EnvironmentFile=-/etc/sparkesp32/display.env
 ExecStart=/opt/sparkesp32/venv/bin/python /opt/sparkesp32/sparkesp32_agent.py
 Restart=always
 RestartSec=3

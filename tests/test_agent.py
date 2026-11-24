@@ -509,16 +509,19 @@ def streaming_to(board):
 class SerialLoopTest(unittest.TestCase):
     """The link states serial_loop publishes for /healthz, with stand-in ports and boards."""
 
-    def run_loop(self, open_port, done, timeout=4.0, bridge=False):
+    def run_loop(self, open_port, done, timeout=4.0, bridge=False, display=None, found=None):
+        """serial_loop until done(display state). The agent finds one port (a temporary file's
+        path), or what found(display) returns; `display` is the id install.sh saved."""
         with tempfile.NamedTemporaryFile() as dev:     # a port path that exists, like a real node
             saved = agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S
             agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S = (
-                lambda: [(dev.name, bridge)]), open_port, 0.3
+                lambda display=None: found(display) if found else [(dev.name, bridge)]), open_port, 0.3
             line = "stat 1 2 3 4 5 6 7 h 2405 0"
             sampler = types.SimpleNamespace(display={"state": "searching"},
                                             latest=lambda: (line, time.monotonic(), {}))
             stop = threading.Event()
-            loop = threading.Thread(target=agent.serial_loop, args=(sampler, None, stop), daemon=True)
+            loop = threading.Thread(target=agent.serial_loop, args=(sampler, None, stop, display),
+                                    daemon=True)
             loop.start()
             try:
                 deadline = time.monotonic() + timeout
@@ -543,17 +546,32 @@ class SerialLoopTest(unittest.TestCase):
         self.assertEqual(d["proto"], 2)
         self.assertIn(b"stat 1 2 3 4 5 6 7 h 2405 0\n", board.sent)
 
-    def test_a_silent_device_is_reported_as_rejected(self):
-        d, port = self.run_loop(lambda *a, **k: BootingBoard(deaf=10**6), lambda d: d["state"] == "rejected")
+    def test_a_silent_device_waits_for_a_replug(self):
+        # found, not named: it may be any Espressif board or gadget, so it's asked once per plug-in
+        for bridge in (False, True):
+            with self.subTest(bridge=bridge):
+                d, port = self.run_loop(lambda *a, **k: BootingBoard(deaf=10**6),
+                                        lambda d: d["state"] == "rejected", bridge=bridge)
+                self.assertEqual((d["state"], d["port"], d["retry_in_s"]), ("rejected", port, None))
+                json.dumps(d, allow_nan=False)         # /healthz stays valid JSON
+
+    def test_the_saved_display_is_asked_again(self):
+        # the device install.sh saw answer: silent now (mid-flash, say), so it's retried, not dropped
+        d, port = self.run_loop(lambda *a, **k: BootingBoard(deaf=10**6), lambda d: d["state"] == "rejected",
+                                display="303a:1001:F4:12:FA:00:00:01")
         self.assertEqual((d["state"], d["port"]), ("rejected", port))
         self.assertGreater(d["retry_in_s"], agent.REJECT_S - 10)
 
-    def test_a_silent_bridge_waits_for_a_replug(self):
-        # a USB-UART bridge may be any gadget: asked once, then left alone while it's plugged in
-        d, port = self.run_loop(lambda *a, **k: BootingBoard(deaf=10**6), lambda d: d["state"] == "rejected",
-                                bridge=True)
-        self.assertEqual((d["state"], d["port"], d["retry_in_s"]), ("rejected", port, None))
-        json.dumps(d, allow_nan=False)                 # /healthz stays valid JSON
+    def test_with_a_display_saved_no_other_device_is_opened(self):
+        opened = []
+
+        def open_port(*a, **k):
+            opened.append(a)
+            return BootingBoard(deaf=0)                 # it would even answer as a display
+        d, _ = self.run_loop(open_port, lambda d: "ignoring" in d, display="303a:1001:F4:12:FA:00:00:01",
+                             found=lambda display: [] if display else [("/dev/ttyACM7", False)])
+        self.assertEqual(d, {"state": "searching", "ignoring": ["/dev/ttyACM7"]})
+        self.assertEqual(opened, [])
 
     def test_a_display_behind_a_bridge_streams(self):
         opened = []
@@ -606,7 +624,7 @@ class SerialLoopTest(unittest.TestCase):
                 return opened[-1]
             saved = agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S
             agent.candidate_ports, agent.serial.Serial, agent.HANDSHAKE_S = (
-                lambda: [(dev, True)]), open_port, 0.3
+                lambda display=None: [(dev, True)]), open_port, 0.3
             sampler = types.SimpleNamespace(display={"state": "searching"},
                                             latest=lambda: ("stat 1 2 3 4 5 6 7 h", time.monotonic(), {}))
             stop = threading.Event()
@@ -635,15 +653,20 @@ class SerialLoopTest(unittest.TestCase):
         self.assertEqual((d["state"], d["error"]), ("searching", "permission denied"))
 
 
+def usb(device, vid, pid, serial_number=None, location=None):
+    return types.SimpleNamespace(device=device, vid=vid, pid=pid, serial_number=serial_number,
+                                 location=location)
+
+
 class PortDiscoveryTest(unittest.TestCase):
     PORTS = [
-        types.SimpleNamespace(device="/dev/ttyUSB0", vid=0x1A86, pid=0x7523),    # CH340 bridge
-        types.SimpleNamespace(device="/dev/ttyACM1", vid=0x303A, pid=0x1001),    # native USB
-        types.SimpleNamespace(device="/dev/ttyACM0", vid=0x303A, pid=0x1001),
-        types.SimpleNamespace(device="/dev/ttyUSB1", vid=0x0403, pid=0x6001),    # FTDI: not ours
-        types.SimpleNamespace(device="/dev/ttyS0", vid=None, pid=None),          # no USB at all
-        types.SimpleNamespace(device="/dev/cu.usbserial-10", vid=0x10C4, pid=0xEA60),
-        types.SimpleNamespace(device="/dev/tty.usbserial-10", vid=0x10C4, pid=0xEA60),   # its macOS twin
+        usb("/dev/ttyUSB0", 0x1A86, 0x7523, location="1-2.3:1.0"),               # CH340 bridge: no serial
+        usb("/dev/ttyACM1", 0x303A, 0x1001, "F4:12:FA:00:00:01", "1-1:1.0"),     # native USB
+        usb("/dev/ttyACM0", 0x303A, 0x1001, "F4:12:FA:00:00:02", "1-4:1.0"),
+        usb("/dev/ttyUSB1", 0x0403, 0x6001, "A9XYZ", "1-5:1.0"),                 # FTDI: not ours
+        usb("/dev/ttyS0", None, None),                                           # no USB at all
+        usb("/dev/cu.usbserial-10", 0x10C4, 0xEA60, "0001", "20-2"),
+        usb("/dev/tty.usbserial-10", 0x10C4, 0xEA60, "0001", "20-2"),            # its macOS twin
     ]
 
     def setUp(self):
@@ -657,6 +680,22 @@ class PortDiscoveryTest(unittest.TestCase):
         self.assertEqual(agent.candidate_ports(), [
             ("/dev/ttyACM0", False), ("/dev/ttyACM1", False),
             ("/dev/cu.usbserial-10", True), ("/dev/tty.usbserial-10", True), ("/dev/ttyUSB0", True)])
+
+    def test_a_saved_display_is_the_only_candidate(self):
+        self.assertEqual(agent.candidate_ports("303a:1001:F4:12:FA:00:00:01"), [("/dev/ttyACM1", False)])
+        self.assertEqual(agent.candidate_ports("1a86:7523@1-2.3:1.0"), [("/dev/ttyUSB0", True)])
+        self.assertEqual(agent.candidate_ports("303a:1001:F4:12:FA:00:00:09"), [])     # not plugged in
+
+    def test_a_device_is_known_by_its_serial_number_or_its_socket(self):
+        ids = {p.device: agent.port_id(p) for p in self.PORTS}
+        self.assertEqual(ids["/dev/ttyACM0"], "303a:1001:F4:12:FA:00:00:02")
+        self.assertEqual(ids["/dev/ttyUSB0"], "1a86:7523@1-2.3:1.0")       # a CH340 has no serial number
+        self.assertIsNone(ids["/dev/ttyS0"])
+        self.assertIsNone(agent.port_id(usb("/dev/ttyUSB9", 0x1A86, 0x7523)))            # nothing to go by
+        # the id goes into a file systemd reads as settings: a device can't put a second one there
+        self.assertIsNone(agent.port_id(usb("/dev/ttyACM9", 0x303A, 0x1001, "x\nSPARKLINE_URL=http://evil")))
+        for p in self.PORTS:                           # install.sh saves with the tools' rule
+            self.assertEqual(sparklink.port_id(p.device), ids[p.device])
 
     def test_tools_take_native_ports_when_there_are_any(self):
         # an unrelated CH340/CP210x gadget must not make a native display ambiguous
@@ -746,6 +785,19 @@ class LinkTest(unittest.TestCase):
     def test_unopenable_port_is_a_link_error(self):
         with self.assertRaises(sparklink.LinkError):
             sparklink.Link("/dev/sparkesp32-no-such-port")
+
+    def test_the_port_is_locked_and_a_locked_one_says_who_has_it(self):
+        asked = []
+
+        def locked(*a, **k):
+            asked.append(k.get("exclusive"))
+            raise sparklink.serial.SerialException("Could not exclusively lock port /dev/ttyACM0")
+        saved, sparklink.serial.Serial = sparklink.serial.Serial, locked
+        self.addCleanup(setattr, sparklink.serial, "Serial", saved)
+        with self.assertRaises(sparklink.LinkError) as e:
+            sparklink.Link("/dev/ttyACM0")
+        self.assertEqual(asked, [True])
+        self.assertIn("systemctl stop sparkesp32", str(e.exception))
 
     def test_echo_and_console_footer_are_not_the_reply(self):
         link = link_with(lambda c: "ERR stat cpu\r\nCommand returned non-zero error code: 0x1 (ERROR)\r\n")

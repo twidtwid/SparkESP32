@@ -18,9 +18,9 @@ publishes the same `stat` line (protocol v2, see docs/protocol.md) two ways:
     2. HTTP: GET /stat on :8787, polled by the display over Wi-Fi; GET /healthz is JSON
 A display whose firmware predates protocol v2 gets the v1 line it understands.
 
-The serial side only talks to a device that matches the display's USB ID *and*
-answers the `status` handshake with `fw=sparkesp32`, so other serial gadgets on
-the host are never written to. Installed by install.sh as a systemd service.
+The serial side streams only to a device that answers the `status` handshake with
+`fw=sparkesp32`, and once install.sh has seen the display it opens no other device
+(see serial_loop). Installed by install.sh as a systemd service.
 """
 import argparse
 import http.client
@@ -60,8 +60,9 @@ BRIDGE_IDS = {(0x1A86, 0x7523),       # WCH CH340
 BAUD = 115200                         # native USB ignores it; a board behind a bridge runs its console at it
 LEGACY_BAUD = 921600                  # 1.3.0 ran bridge boards at this: asked second, so they still connect
 HANDSHAKE = b"fw=sparkesp32"
-REJECT_S = 300.0                      # a native port that fails the handshake is skipped this long;
-                                      # a bridge, until it's replugged: it may be some other gadget
+REJECT_S = 300.0                      # the display install.sh saw (or --port names) is asked again this
+                                      # long after it fails the handshake; any other device, not until
+                                      # it's replugged: it may be some other gadget
 HANDSHAKE_S = 10.0                    # keep asking a just-plugged-in board this long: it's still
                                       # booting, then its console drops input for 0.5 s
 STALE_S = 5.0                        # /stat answers 503 if the sampler is older than this
@@ -548,10 +549,24 @@ def is_bridge(port):
                for p in serial.tools.list_ports.comports())
 
 
-def candidate_ports():
-    """[(device, is_bridge)]: native USB ports first, then USB-UART bridges."""
+def port_id(p):
+    """What tells one USB serial device from another of its kind, as install.sh saves it for
+    the display it saw: "vid:pid:serial" (an Espressif chip's serial number is its MAC), or
+    "vid:pid@location", the USB socket it's in, for a bridge without one (the CH340). None
+    if the device has neither, or the text wouldn't be safe in a settings file.
+    tools/sparklink.py keeps the same rule."""
+    if p.vid is None or p.pid is None:
+        return None
+    rest = f":{p.serial_number}" if p.serial_number else f"@{p.location}" if p.location else ""
+    return f"{p.vid:04x}:{p.pid:04x}{rest}" if re.fullmatch(r"[:@][A-Za-z0-9_:.-]+", rest) else None
+
+
+def candidate_ports(display=None):
+    """[(device, is_bridge)]: native USB ports first, then USB-UART bridges. With `display`
+    (the port_id install.sh saved), that device alone."""
     found = [(p.device, (p.vid, p.pid) in BRIDGE_IDS) for p in serial.tools.list_ports.comports()
-             if (p.vid, p.pid) in NATIVE_IDS or (p.vid, p.pid) in BRIDGE_IDS]
+             if ((p.vid, p.pid) in NATIVE_IDS or (p.vid, p.pid) in BRIDGE_IDS)
+             and display in (None, port_id(p))]
     return sorted(found, key=lambda d: (d[1], d[0]))
 
 
@@ -581,22 +596,33 @@ def handshake(ser, timeout=HANDSHAKE_S, every=1.0):
     return 0
 
 
-def serial_loop(sampler, explicit_port, stop):
+def serial_loop(sampler, explicit_port, stop, display=None):
     """Push each fresh sample to the display; survive unplug/replug.
 
+    Which devices are opened: the one at `explicit_port` (--port); else the one whose
+    port_id is `display`, which install.sh saves when it has seen a display answer; else
+    (no display saved) every Espressif or USB-UART bridge device, native ones first.
+
     The link's state goes to /healthz as sampler.display = {"state": ..., ...}:
-      searching    no usable port ("error" says why if opening one failed)
+      searching    no usable port ("error" says why if opening one failed; "ignoring"
+                   lists the devices left unopened because they aren't the saved display)
       handshaking  asking `status` on "port", for up to HANDSHAKE_S
       streaming    pushing stat lines to "port" ("answered_in_s": handshake time,
                    "proto": the protocol its firmware reads)
-      rejected     "port" didn't answer as a SparkESP32, or (a USB-UART bridge)
-                   another program has it open: skipped until it's replugged
-                   or REJECT_S passes ("retry_in_s"; null for a bridge, which
-                   waits for the replug)
+      rejected     "port" didn't answer as a SparkESP32, or (a USB-UART bridge nobody
+                   named) another program has it locked. The saved or named display is
+                   asked again after REJECT_S ("retry_in_s"); a device that was only
+                   found waits for a replug ("retry_in_s" null): it may be any gadget
 
-    Ports are opened exclusively, so the agent never writes into a port another
-    program holds (a Zigbee stick on a CP210x, say).
+    Opening a port and asking `status` is the only way to tell a display from another
+    Espressif board or serial adapter, so a device that isn't one does get those few
+    bytes: once per plug-in when no display is saved, never when one is. Ports are
+    opened with an advisory lock (flock), which keeps the agent out of a port another
+    program has locked, but not out of one a program has open without locking it.
     """
+    named = bool(explicit_port or display)      # --port or install.sh says which one is the display
+    if display and not explicit_port:
+        log.info("USB: opening only the display install.sh saw (to use another: sudo ./install.sh)")
     # rejected: port -> (until, the device node it was), so a replug clears it however fast
     ser, last_at, rejected, proto = None, 0.0, {}, 1
     while not stop.is_set():
@@ -605,13 +631,19 @@ def serial_loop(sampler, explicit_port, stop):
                 now = time.monotonic()
                 # a replug (a new device node) forgets a rejection, so it's always retried at once
                 rejected = {p: (t, n) for p, (t, n) in rejected.items() if t > now and node_id(p) == n}
-                ports = [(explicit_port, is_bridge(explicit_port))] if explicit_port else candidate_ports()
+                ports = ([(explicit_port, is_bridge(explicit_port))] if explicit_port
+                         else candidate_ports(display))
                 ports = [(p, b) for p, b in ports if p not in rejected]
                 if not ports:
+                    others = [p for p, _ in candidate_ports()] if display and not explicit_port else []
                     if rejected:
                         port, (until, _) = min(rejected.items(), key=lambda kv: kv[1][0])
                         sampler.display = {"state": "rejected", "port": port,
                                            "retry_in_s": None if until == math.inf else round(until - now)}
+                    elif others:
+                        sampler.display = {"state": "searching", "ignoring": others}
+                        rl.warn("ignoring", "not opening %s: not the display install.sh saw (to use it as "
+                                "the display, run sudo ./install.sh with it plugged in)", ", ".join(others))
                     else:
                         sampler.display = {"state": "searching"}
                     stop.wait(2)
@@ -621,9 +653,9 @@ def serial_loop(sampler, explicit_port, stop):
                 try:
                     ser = serial.Serial(port, BAUD, timeout=0.2, write_timeout=1, exclusive=True)
                 except (OSError, serial.SerialException) as e:
-                    if not bridge:
+                    if named or not bridge:
                         raise
-                    # busy (another program holds it) or unopenable: not ours to poke
+                    # locked by another program, or unopenable: not ours to poke
                     log.warning("can't open %s (a USB-UART bridge): %s; leaving it alone until it's "
                                 "replugged", port, e)
                     rejected[port] = (math.inf, node_id(port))
@@ -637,15 +669,18 @@ def serial_loop(sampler, explicit_port, stop):
                         log.warning("%s answers at %d baud: its firmware is older than 1.4.0; update it "
                                     "with install.sh", port, LEGACY_BAUD)
                 if not proto:
-                    if bridge:      # a USB-UART bridge may be any gadget: ask it once per plug-in
-                        log.warning("%s (a USB-UART bridge) didn't answer as a SparkESP32; leaving it "
-                                    "alone until it's replugged", port)
-                    else:
-                        log.warning("%s is an Espressif USB device but not a SparkESP32; ignoring it "
-                                    "for %d minutes or until it's replugged", port, REJECT_S // 60)
                     ser.close()
                     ser = None
-                    rejected[port] = (math.inf if bridge else time.monotonic() + REJECT_S, node_id(port))
+                    if named:
+                        log.warning("%s didn't answer as a SparkESP32; asking again in %d minutes, or when "
+                                    "it's replugged", port, REJECT_S // 60)
+                        until = time.monotonic() + REJECT_S
+                    else:           # only found, and it may be any gadget: asked once per plug-in
+                        log.warning("%s (%s) didn't answer as a SparkESP32; leaving it alone until it's "
+                                    "replugged", port,
+                                    "a USB-UART bridge" if bridge else "an Espressif USB device")
+                        until = math.inf
+                    rejected[port] = (until, node_id(port))
                     continue
                 took = round(time.monotonic() - t0, 1)
                 log.info("display connected on %s (answered in %.1fs, protocol v%d)", port, took, proto)
@@ -685,6 +720,9 @@ def main():
     ap.add_argument("--no-serial", action="store_true", help="HTTP only")
     ap.add_argument("--no-http", action="store_true", help="USB only")
     ap.add_argument("--once", action="store_true", help="print one stat line and exit")
+    ap.add_argument("--display", default=os.environ.get("SPARKESP32_DISPLAY"), metavar="ID",
+                    help="open only the USB device with this id (install.sh saves the id of the "
+                         "display it saw); default: ask every Espressif or bridge device once")
     ap.add_argument("--sparkline-url", default=os.environ.get("SPARKLINE_URL"),
                     help="read from the Sparkline agent at this URL, on this host (http://auto:PORT "
                          "for its default-route address; token in $SPARKLINE_TOKEN); install.sh "
@@ -719,7 +757,7 @@ def main():
         if serial is None:
             log.warning("pyserial missing: USB output disabled")
         else:
-            threading.Thread(target=serial_loop, args=(sampler, args.port, stop),
+            threading.Thread(target=serial_loop, args=(sampler, args.port, stop, args.display),
                              daemon=True, name="serial").start()
 
     while not stop.wait(args.interval):

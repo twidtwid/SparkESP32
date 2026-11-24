@@ -20,6 +20,7 @@ VENV="$OPT/venv"
 UNIT=/etc/systemd/system/sparkesp32.service
 RULES=/etc/udev/rules.d/99-sparkesp32.rules
 SL_ENV=/etc/sparkesp32/sparkline.env      # Sparkline's agent URL + token, when we read from it
+DISPLAY_ENV=/etc/sparkesp32/display.env   # which USB device is the display, once we've seen it
 HTTP_PORT=8787
 
 boards() { (cd "$HERE/firmware/boards" 2>/dev/null && printf '%s ' */ | tr -d /); }
@@ -50,6 +51,8 @@ SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
   --no-sparkline           sample this host ourselves even if a Sparkline agent runs here
   --reflash                flash even if the board already runs $VERSION
   --port DEV               the display's serial port (default: autodetect)
+  --any-display            forget which USB device is the display: the agent asks every
+                           Espressif or USB-UART device once when it's plugged in
   --lan CIDR               subnet whose displays may reach :$HTTP_PORT (default: this host's)
   -y, --yes                no questions (for scripts and agents)
   --uninstall              remove the service, rules and $OPT (display settings stay)
@@ -66,6 +69,7 @@ ARGS=""; [ $# -eq 0 ] || printf -v ARGS ' %q' "$@"    # for the "run with sudo" 
 
 NAME="" NAME_SET="" HOST="" SSIDS="" PW_ENV="" OPEN_WIFI="" CLEAR_WIFI="" NO_WIFI="" ROTATION=""
 FW_DIR="" NO_FLASH="" REFLASH="" PORT="" LAN_CIDR="" YES="" UNINSTALL="" BOARD="" NO_SPARKLINE=""
+ANY_DISPLAY=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --name) NAME="${2?--name needs a value (\"\" for the hostname)}"; NAME_SET=1; shift ;;
@@ -84,6 +88,7 @@ while [ $# -gt 0 ]; do
         --port) PORT="${2?--port needs a device}"; shift ;;
         --lan) LAN_CIDR="${2?--lan needs a CIDR}"; shift ;;
         -y|--yes) YES=1 ;;
+        --any-display) ANY_DISPLAY=1 ;;
         --uninstall) UNINSTALL=1 ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; die "unknown option: $1" ;;
@@ -347,6 +352,34 @@ if [ -n "$SL_URL" ]; then
     (umask 077 && printf 'SPARKLINE_URL=%s\nSPARKLINE_TOKEN=%s\n' "$SL_URL" "$SL_TOKEN" > "$SL_ENV")
 else
     rm -f "$SL_ENV"
+fi
+
+# ------------------------------------------------------------------ which device is the display
+
+# Telling a display from another Espressif board or serial adapter takes opening its port and
+# asking it. We just did that for the display on $PORT, with you there; the agent shouldn't
+# keep doing it to whatever else gets plugged into this Spark. So save what identifies this
+# device (its USB serial number, or for a bridge without one its USB socket), and the agent
+# opens that device only. No display this time: what was saved stays.
+display_id() {       # the id to save for the display on $PORT, or nothing
+    [ -n "$PORT" ] && [ -n "$DEV_STATUS" ] || return 0
+    sparklink 'print(sparklink.port_id(sys.argv[2]) or "")' "$PORT" 2>/dev/null || true
+}
+
+if [ -n "$ANY_DISPLAY" ]; then
+    rm -f "$DISPLAY_ENV"
+    say "the agent will ask every Espressif or USB-UART device once when it's plugged in"
+else
+    DISPLAY_ID="$(display_id)"
+    if [ -n "$DISPLAY_ID" ]; then
+        install -d -m 0755 "$(dirname "$DISPLAY_ENV")"
+        printf 'SPARKESP32_DISPLAY=%s\n' "$DISPLAY_ID" > "$DISPLAY_ENV"
+        say "the agent will open this display only (for another one: plug it in and re-run this)"
+    elif [ -n "$PORT" ] && [ -n "$DEV_STATUS" ]; then
+        rm -f "$DISPLAY_ENV"      # a display we can't tell apart: don't hold the agent to an older one
+        warn "this display has no USB serial number or location to know it by: the agent will ask"
+        warn "every Espressif or USB-UART device once when it's plugged in"
+    fi
 fi
 
 # ------------------------------------------------------------------ service

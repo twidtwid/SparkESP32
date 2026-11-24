@@ -63,6 +63,20 @@ def is_bridge(port):
                for p in serial.tools.list_ports.comports())
 
 
+def port_id(port):
+    """What tells the USB serial device at `port` from another of its kind: "vid:pid:serial"
+    (an Espressif chip's serial number is its MAC), or "vid:pid@location", the USB socket
+    it's in, for a bridge without one (the CH340). None if it has neither, or the text
+    wouldn't be safe in a settings file. install.sh saves it for the display it has seen
+    answer, and the agent, which keeps the same rule, then opens no other device."""
+    for p in serial.tools.list_ports.comports():
+        if p.device == port and p.vid is not None and p.pid is not None:
+            rest = f":{p.serial_number}" if p.serial_number else f"@{p.location}" if p.location else ""
+            if re.fullmatch(r"[:@][A-Za-z0-9_:.-]+", rest):
+                return f"{p.vid:04x}:{p.pid:04x}{rest}"
+    return None
+
+
 def end_pattern(cmd):
     marker = _ENDS.get(" ".join(cmd.split()[:2]))
     return rf"^({marker}$|ERR\s)" if marker else _VERDICT
@@ -77,10 +91,12 @@ def clean_lines(raw):
 class Link:
     def __init__(self, port, baud=BAUD):
         self.port = port
-        try:
-            self.ser = serial.Serial(port, baud, timeout=0.2, write_timeout=2)
+        try:        # locked like the agent locks it: two programs on one console garble each other
+            self.ser = serial.Serial(port, baud, timeout=0.2, write_timeout=2, exclusive=True)
         except serial.SerialException as e:
-            raise LinkError(f"can't open {port}: {e}") from None
+            busy = " (another program has it: on the Spark, sudo systemctl stop sparkesp32)" \
+                if "lock" in str(e) else ""
+            raise LinkError(f"can't open {port}: {e}{busy}") from None
         time.sleep(0.2)
         self.ser.reset_input_buffer()
 
