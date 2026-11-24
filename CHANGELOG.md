@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 1.4.3 — 2026-11-24
 
 ### Security
 
