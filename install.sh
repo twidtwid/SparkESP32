@@ -191,6 +191,8 @@ firmware_dir() {     # echo a dir holding $BOARD's bundle for $VERSION, fetching
     local url="$REPO_URL/releases/download/v$VERSION/$pkg.tar.gz"
     say "downloading firmware $VERSION for $BOARD" >&2
     curl -fsSL "$url" | tar -xz -C "$d" --strip-components=1 || die "couldn't download $url"
+    # the bundle's own list: this catches a damaged download, not a release someone replaced
+    # (README: gh attestation verify)
     (cd "$d" && sha256sum --quiet -c SHA256SUMS) || die "firmware checksum mismatch"
     echo "$d"
 }

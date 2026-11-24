@@ -159,6 +159,9 @@ To flash a board from a computer, download `sparkesp32-<board>-firmware-<version
 for your board from [Releases](https://github.com/twidtwid/SparkESP32/releases) and run
 `python3 -m esptool write_flash @flash_args` inside the unpacked folder. esptool refuses
 an image built for a different chip.
+Releases after 1.4.1 are signed by the workflow that built them:
+`gh attestation verify sparkesp32-<board>-firmware-<version>.tar.gz --repo twidtwid/SparkESP32`
+checks that a download is what this repo's release workflow built from that version's tag.
 The release also has a single merged image for browser flashers like
 [ESP Web Tool](https://espressif.github.io/esptool-js/). Use the merged image only on a
 board you haven't set up yet, because it erases the saved settings.
