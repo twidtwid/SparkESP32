@@ -48,7 +48,7 @@ bundle: build
 	cp $(BUILD)/bootloader/bootloader.bin $(BUILD)/partition_table/partition-table.bin \
 	   $(BUILD)/sparkesp32.bin $(DIST)/$(PKG)/
 	sed 's|[^ ]*/||' $(BUILD)/flash_args > $(DIST)/$(PKG)/flash_args   # paths: the bundle's own files
-	cd $(DIST)/$(PKG) && $(SHA) bootloader.bin partition-table.bin sparkesp32.bin > SHA256SUMS
+	cd $(DIST)/$(PKG) && $(SHA) bootloader.bin partition-table.bin sparkesp32.bin flash_args > SHA256SUMS
 	cd $(DIST)/$(PKG) && python -m esptool --chip $(TARGET) merge_bin \
 	   -o ../sparkesp32-$(BOARD)-$(VERSION)-merged.bin @flash_args
 	tar -C $(DIST) -czf $(DIST)/$(PKG).tar.gz $(PKG)

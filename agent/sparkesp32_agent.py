@@ -90,6 +90,7 @@ STUCK_AFTER = 10                      # loaded samples in a row that look stuck 
 HEALTHY_AFTER = 5                     # loaded samples in a row that look healthy to clear it
 IDLE_REASON = 0x1                     # NVML's GpuIdle event reason: not a limit
 SPARKLINE_TIMEOUT_S = 1.5             # one snapshot request; slower than this counts as a failure
+SPARKLINE_MAX_BYTES = 65536           # a snapshot is a few KB; more than this is not one
 SPARKLINE_RETRY_S = 30.0              # after a failure, sample ourselves this long before asking again
 
 
@@ -349,7 +350,10 @@ class SparklineSource:
             if r.status != 200:                     # a redirect too: the token doesn't follow one
                 raise ValueError(f"HTTP {r.status}" + (" (token rejected: re-run install.sh)"
                                                        if r.status in (401, 403) else ""))
-            return json.load(r)
+            body = r.read(SPARKLINE_MAX_BYTES + 1)
+            if len(body) > SPARKLINE_MAX_BYTES:
+                raise ValueError(f"snapshot over {SPARKLINE_MAX_BYTES} bytes")
+            return json.loads(body)
         finally:
             conn.close()
 
@@ -363,7 +367,7 @@ class SparklineSource:
             if age > STALE_S:
                 raise ValueError(f"its latest sample is {age:.0f}s old")
             fields = snapshot_fields(s)
-        except (KeyError, TypeError, IndexError, AttributeError) as e:
+        except (KeyError, TypeError, IndexError, AttributeError, ArithmeticError, RecursionError) as e:
             why = f"unrecognized snapshot ({type(e).__name__}: {e})"
         except (OSError, ValueError, http.client.HTTPException) as e:   # refused, timeout, not this
             why = str(e) or type(e).__name__                            # host, an HTTP error, bad JSON, stale

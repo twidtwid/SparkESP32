@@ -226,11 +226,38 @@ class InstallerBoardDetection(unittest.TestCase):
     def test_board_flag_wins(self):
         self.assertEqual(self.pick(self.NEW_FW.format(RLCD), board=TFT), f"BOARD={TFT}")
 
+    def test_a_path_from_the_device_isnt_a_board(self):
+        self.assertIn("DIE: unknown board", self.pick(self.NEW_FW.format("../boards/" + C6)))
+
     def test_unknown_board_flag(self):
         self.assertIn("DIE: unknown board", self.pick(self.OLD_FW, board="nope-esp32-x-1"))
 
     def test_unidentifiable(self):
         self.assertIn("DIE: couldn't identify", self.pick("", chip=""))
+
+
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
+class InstallerFlashArgs(unittest.TestCase):
+    """flash_args_ok: esptool gets only flash settings and the bundle's three images."""
+    GOOD = ("--flash_mode dio --flash_freq 80m --flash_size 16MB\n0x0 bootloader.bin\n"
+            "0x10000 sparkesp32.bin\n0x8000 partition-table.bin\n")
+
+    def ok(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            f = pathlib.Path(tmp, "flash_args")
+            f.write_text(text)
+            script = installer_functions("flash_args_ok") + f"\nflash_args_ok '{f}'"
+            r = subprocess.run(["bash", "-c", script], timeout=20)
+            return r.returncode == 0
+
+    def test_a_real_bundles_flash_args(self):
+        self.assertTrue(self.ok(self.GOOD))
+
+    def test_anything_else_is_refused(self):
+        for bad in ["0x200000 /etc/sparkesp32/sparkline.env\n", "0x0 ../bootloader.bin\n",
+                    "--erase-all\n", "0x0 bootloader.bin --no-stub\n", ""]:
+            with self.subTest(bad=bad):
+                self.assertFalse(self.ok(self.GOOD + bad if bad else bad))
 
 
 @unittest.skipUnless(shutil.which("bash"), "needs bash")
