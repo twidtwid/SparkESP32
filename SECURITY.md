@@ -34,7 +34,8 @@ Things this project deliberately does, so you can judge reports against them:
   itself. It is not meant to be exposed to the internet.
 - The Wi-Fi password is stored **unencrypted** in the display's flash (NVS),
   like on most consumer IoT devices. Anyone with physical access to the board
-  can read it. It is never printed to the console, logged, or kept in the
+  can read it, and so can any computer it's plugged into (`esptool read_flash`: flash
+  encryption is off). It is never printed to the console, logged, or kept in the
   console's command history, and the Wi-Fi driver's own persistent copy is disabled.
 - The agent runs as an unprivileged user of its own (systemd's `DynamicUser`, nobody's
   login account) under a hardened systemd unit: no capabilities, no home directories, a

@@ -993,7 +993,10 @@ class SparklineSourceTest(unittest.TestCase):
         for body, why in [(json.dumps(snapshot(ts=time.time() - 60)), "old"),
                           ("not json", "Expecting value"),
                           (json.dumps({"ts": time.time()}), "unrecognized"),
-                          (json.dumps(snapshot(gpu="oops")), "unrecognized")]:
+                          (json.dumps(snapshot(gpu="oops")), "unrecognized"),
+                          (json.dumps(snapshot(cpu=dict(snapshot()["cpu"], util=float("inf")))),
+                           "unrecognized"),                       # 1e999 in JSON: round() overflows
+                          ("x" * 70000, "over 65536 bytes")]:
             with self.subTest(why=why):
                 url, _ = self.serve(body=body)
                 src = agent.SparklineSource(url, self.TOKEN)

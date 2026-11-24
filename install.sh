@@ -171,7 +171,7 @@ install -m 0755 "$HERE/tools/provision.py" "$HERE/tools/devctl.py" "$OPT/tools/"
 "$VENV/bin/python" -I -m pip install --quiet --disable-pip-version-check --require-hashes \
     -r "$HERE/agent/requirements.txt" || die "pip install failed (needs internet access to PyPI)"
 PY="$VENV/bin/python"
-devctl() { "$PY" "$OPT/tools/devctl.py" ${PORT:+--port "$PORT"} "$@"; }
+devctl() { "$PY" -I "$OPT/tools/devctl.py" ${PORT:+--port "$PORT"} "$@"; }
 
 # ------------------------------------------------------------------ display
 
@@ -182,6 +182,13 @@ if [ -z "$PORT" ]; then
     [ "${#PORTS[@]}" -gt 1 ] && die "several USB serial devices that could be the display (${PORTS[*]}); pick one with --port"
     PORT="${PORTS[0]:-}"
 fi
+
+# esptool runs flash_args as root, as arguments: a line it shouldn't have (another file to
+# write, an option) would do what that line says. The bundle's SHA256SUMS didn't cover it
+# before 1.4.3, so check its shape: flash settings, then an offset and one of the three images.
+flash_args_ok() {    # flash_args_ok FILE: true if every line is one esptool should get
+    [ -s "$1" ] && ! grep -qvE '^(--flash_(mode|freq|size) [A-Za-z0-9]+ ?)+$|^0x[0-9a-fA-F]+ (bootloader|partition-table|sparkesp32)\.bin$' "$1"
+}
 
 firmware_dir() {     # echo a dir holding $BOARD's bundle for $VERSION, fetching if needed
     local d pkg="sparkesp32-$BOARD-firmware-$VERSION"
@@ -218,7 +225,8 @@ pick_board() {       # which board is on $PORT: --board, what its firmware says,
             die "the board on $PORT is an $chip; pick its board with --board (one of: ${found[*]:-$(boards)})"
         BOARD="${found[0]}"
     fi
-    [ -n "$(board_target "$BOARD")" ] || die "unknown board '$BOARD'; one of: $(boards)"
+    # BOARD may come from the device (board=...): only a name from the list, never a path
+    case " $(boards) " in *" $BOARD "*) ;; *) die "unknown board '$BOARD'; one of: $(boards)" ;; esac
 }
 
 DEV_STATUS=""
@@ -285,6 +293,7 @@ else
         # Split images at the offsets in the bundle's flash_args, never a merged image:
         # that overwrites the NVS partition and the board would forget its Wi-Fi and
         # name. esptool reads the chip itself and refuses an image built for another.
+        flash_args_ok "$FW/flash_args" || die "$FW/flash_args has a line esptool shouldn't get: not flashing"
         if ! (cd "$FW" && "$PY" -I -m esptool -p "$PORT" -b 460800 --before default_reset --after hard_reset \
                 write_flash @flash_args); then
             # a refused image leaves the chip in its bootloader: reset it back (best effort)
@@ -351,7 +360,7 @@ if [ -n "$PORT" ] && [ -n "$DEV_STATUS" ]; then
     fi
 
     say "configuring the display"
-    "$PY" "$OPT/tools/provision.py" ${PORT:+--port "$PORT"} "${args[@]}" ||
+    "$PY" -I "$OPT/tools/provision.py" ${PORT:+--port "$PORT"} "${args[@]}" ||
         die "display setup failed (see above); nothing else was changed on the board"
 fi
 

@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Security
+
+- The installer checks a firmware bundle's `flash_args` before esptool, which runs as
+  root, gets it: only flash settings and the bundle's three images. A line naming any
+  other file or option stops the install. The bundle's `SHA256SUMS` now covers
+  `flash_args` too.
+- A board name from the device (`board=` in its handshake) must be one of the boards in
+  `firmware/boards/`, never a path.
+- Every Python the installer and the service run is isolated (`-I`), including the tools
+  and the agent itself.
+
+### Fixed
+
+- A Sparkline snapshot with a number too big to round (`1e999`) or a reply over 64 KB is
+  now an unrecognized snapshot: the agent samples the Spark itself and asks Sparkline again
+  after 30 s. Before, it raised on every tick and the display went offline.
+
+### Changed
+
+- SECURITY.md: any computer the display is plugged into can read its Wi-Fi password from
+  flash (`esptool read_flash`), not just someone holding the board.
+
 ## 1.4.2 — 2026-11-23
 
 ### Security
