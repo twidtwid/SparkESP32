@@ -126,7 +126,9 @@ RUN_USER="${RUN_USER:-${SUDO_USER:-}}"
     die "run this with sudo from your normal account (or set RUN_USER=<user>); the agent doesn't run as root"
 id "$RUN_USER" >/dev/null 2>&1 || die "no such user: $RUN_USER"
 command -v python3 >/dev/null || die "python3 is required"
-python3 -c 'import ensurepip, venv' 2>/dev/null || die "python3-venv is required: sudo apt install python3-venv"
+# Every python here runs isolated (-I). Without it, -c, -m and a script on stdin put the
+# current directory first on the module path, and this runs as root from wherever it's called.
+python3 -I -c 'import ensurepip, venv' 2>/dev/null || die "python3-venv is required: sudo apt install python3-venv"
 command -v nvidia-smi >/dev/null || warn "nvidia-smi not found: GPU, temperature and power will show --"
 case "$ROTATION" in ""|none|ccw|cw) ;; *) die "--rotation must be none, ccw or cw" ;; esac
 if [ -n "$PW_ENV" ] && [ -z "${!PW_ENV+x}" ]; then
@@ -156,15 +158,15 @@ install -m 0644 "$HERE/VERSION" "$OPT/VERSION"
 install -m 0755 "$HERE/agent/sparkesp32_agent.py" "$OPT/sparkesp32_agent.py"
 install -m 0644 "$HERE/tools/sparklink.py" "$OPT/tools/sparklink.py"
 install -m 0755 "$HERE/tools/provision.py" "$HERE/tools/devctl.py" "$OPT/tools/"
-[ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
-"$VENV/bin/python" -m pip install --quiet --disable-pip-version-check -r "$HERE/agent/requirements.txt" ||
+[ -x "$VENV/bin/python" ] || python3 -I -m venv "$VENV"
+"$VENV/bin/python" -I -m pip install --quiet --disable-pip-version-check -r "$HERE/agent/requirements.txt" ||
     die "pip install failed (needs internet access to PyPI)"
 PY="$VENV/bin/python"
 devctl() { "$PY" "$OPT/tools/devctl.py" ${PORT:+--port "$PORT"} "$@"; }
 
 # ------------------------------------------------------------------ display
 
-sparklink() { "$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import sparklink; '"$1" "$OPT/tools" "${@:2}"; }
+sparklink() { "$PY" -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import sparklink; '"$1" "$OPT/tools" "${@:2}"; }
 PORT_GIVEN="$PORT"
 if [ -z "$PORT" ]; then
     mapfile -t PORTS < <(sparklink 'print("\n".join(sparklink.find_ports()))')
@@ -197,7 +199,7 @@ pick_board() {       # which board is on $PORT: --board, what its firmware says,
     [ -n "$BOARD" ] || BOARD="$(status_board)"
     if [ -z "$BOARD" ]; then      # factory firmware, or SparkESP32 from before boards: ask the chip
         local chip b found=()
-        chip="$("$PY" -m esptool -p "$PORT" chip_id 2>/dev/null | sed -n 's/^Chip is \(ESP32-[A-Z0-9]*\).*/\1/p' |
+        chip="$("$PY" -I -m esptool -p "$PORT" chip_id 2>/dev/null | sed -n 's/^Chip is \(ESP32-[A-Z0-9]*\).*/\1/p' |
                 tr '[:upper:]' '[:lower:]' | tr -d -)" || chip=""
         [ -n "$chip" ] || die "couldn't identify the board on $PORT; name it with --board ($(boards))"
         for b in $(boards); do [ "$(board_target "$b")" = "$chip" ] && found+=("$b"); done
@@ -242,10 +244,10 @@ else
         # Split images at the offsets in the bundle's flash_args, never a merged image:
         # that overwrites the NVS partition and the board would forget its Wi-Fi and
         # name. esptool reads the chip itself and refuses an image built for another.
-        if ! (cd "$FW" && "$PY" -m esptool -p "$PORT" -b 460800 --before default_reset --after hard_reset \
+        if ! (cd "$FW" && "$PY" -I -m esptool -p "$PORT" -b 460800 --before default_reset --after hard_reset \
                 write_flash @flash_args); then
             # a refused image leaves the chip in its bootloader: reset it back (best effort)
-            "$PY" -m esptool -p "$PORT" --after hard_reset chip_id >/dev/null 2>&1 || true
+            "$PY" -I -m esptool -p "$PORT" --after hard_reset chip_id >/dev/null 2>&1 || true
             die "flashing failed: see esptool's message above (\"not an ESP32-... image\": wrong --board;
        can't connect: hold BOOT while plugging the board in, then re-run)"
         fi
@@ -321,7 +323,7 @@ fi
 sparkline_config() {     # prints "URL TOKEN" for a Sparkline agent running here, or nothing
     systemctl is-active --quiet sparkline-agent.service 2>/dev/null || return 0
     [ -r /etc/sparkline/agent.toml ] || return 0
-    "$PY" - <<'EOF' 2>/dev/null || true
+    "$PY" -I - <<'EOF' 2>/dev/null || true
 import subprocess, tomllib
 c = tomllib.load(open("/etc/sparkline/agent.toml", "rb"))
 token, bind, port = c.get("token", ""), c.get("bind", "auto"), c.get("port", 9750)
@@ -363,7 +365,7 @@ if [ -z "$LAN_CIDR" ]; then
     dev="$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')" || dev=""
     addr=""
     [ -z "$dev" ] || addr="$(ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk '{print $4; exit}')" || addr=""
-    LAN_CIDR="$(python3 -c 'import ipaddress, sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$addr" 2>/dev/null || true)"
+    LAN_CIDR="$(python3 -I -c 'import ipaddress, sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$addr" 2>/dev/null || true)"
 fi
 if ufw_active; then
     ufw_delete_ours
@@ -388,7 +390,7 @@ esac
 link="searching"
 if [ -n "$PORT" ]; then
     for _ in $(seq 1 15); do          # the handshake alone may take up to 10 s
-        link="$(curl -fsS -m2 "http://127.0.0.1:$HTTP_PORT/healthz" 2>/dev/null | "$PY" -c \
+        link="$(curl -fsS -m2 "http://127.0.0.1:$HTTP_PORT/healthz" 2>/dev/null | "$PY" -I -c \
             'import json, sys; d = json.load(sys.stdin)["display"]; print(d["state"], d.get("port", ""))' \
             2>/dev/null)" || link="searching"
         [ "${link%% *}" = streaming ] && break
@@ -407,7 +409,7 @@ case "${link%% *}" in
                echo "    plug the display into this Spark's USB-C, or put it on Wi-Fi (README)" ;;
 esac
 if [ -n "$SL_URL" ]; then
-    src="$(curl -fsS -m2 "http://127.0.0.1:$HTTP_PORT/healthz" 2>/dev/null | "$PY" -c \
+    src="$(curl -fsS -m2 "http://127.0.0.1:$HTTP_PORT/healthz" 2>/dev/null | "$PY" -I -c \
         'import json, sys; d = json.load(sys.stdin); print(d.get("source", "?"), (d.get("sparkline") or {}).get("error") or "")' \
         2>/dev/null)" || src="?"
     case "$src" in
