@@ -843,6 +843,12 @@ class LinkTest(unittest.TestCase):
         link = link_with(lambda c: "Unrecognized command\r\n")
         self.assertEqual(link.cmd("bogus"), ["ERR unrecognized command"])
 
+    def test_only_printable_text_reaches_the_terminal(self):
+        # an SSID in a scan, or a device that isn't a display at all, can send escape sequences
+        title, clear = "\x1b]0;pwned\x07", "\x1b[2J"
+        link = link_with(lambda c: f"ap ssid='{title}Home{clear}Net\x9b1mX\x00' chan=6\r\nSCAN-END\r\n")
+        self.assertEqual(link.cmd("wifi scan"), ["ap ssid=']0;pwnedHomeNet1mX' chan=6", "SCAN-END"])
+
     def test_console_quote(self):
         self.assertEqual(sparklink.console_quote('a "b" \\c'), r'"a \"b\" \\c"')
 

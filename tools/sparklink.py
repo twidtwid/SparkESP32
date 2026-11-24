@@ -27,6 +27,7 @@ BRIDGE_IDS = {(0x1A86, 0x7523),              # WCH CH340
 BAUD = 115200       # native USB ignores it; a board behind a bridge runs its console at this rate
 LEGACY_BAUD = 921600  # 1.3.0 ran bridge boards at this: asked second, so they can still be found
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")   # every control character but tab and newline
 ESP_LOG = re.compile(r"[EWIDV] \(\d+\) ")   # "I (4378) tag: ...": the board logging, never a reply
 PROMPT = "spark>"
 
@@ -83,8 +84,10 @@ def end_pattern(cmd):
 
 
 def clean_lines(raw):
-    """Decode, drop ANSI colour codes and the REPL prompt, split into lines."""
-    txt = ANSI.sub("", raw.decode("utf-8", "replace")).replace("\r", "")
+    """Decode, drop ANSI colour codes and the REPL prompt, split into lines. Every other
+    control character goes too: what a device sends is printed on a terminal (root's, in
+    install.sh), and escape sequences can do more there than colour text."""
+    txt = CONTROL.sub("", ANSI.sub("", raw.decode("utf-8", "replace")))
     return [ln[len(PROMPT):] if ln.startswith(PROMPT) else ln for ln in txt.split("\n")]
 
 
