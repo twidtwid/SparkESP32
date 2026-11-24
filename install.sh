@@ -50,7 +50,7 @@ SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
   --no-sparkline           sample this host ourselves even if a Sparkline agent runs here
   --reflash                flash even if the board already runs $VERSION
   --port DEV               the display's serial port (default: autodetect)
-  --lan CIDR               subnet allowed to reach :$HTTP_PORT through ufw (default: this host's)
+  --lan CIDR               subnet whose displays may reach :$HTTP_PORT (default: this host's)
   -y, --yes                no questions (for scripts and agents)
   --uninstall              remove the service, rules and $OPT (display settings stay)
 EOF
@@ -127,6 +127,10 @@ command -v python3 >/dev/null || die "python3 is required"
 python3 -I -c 'import ensurepip, venv' 2>/dev/null || die "python3-venv is required: sudo apt install python3-venv"
 command -v nvidia-smi >/dev/null || warn "nvidia-smi not found: GPU, temperature and power will show --"
 case "$ROTATION" in ""|none|ccw|cw) ;; *) die "--rotation must be none, ccw or cw" ;; esac
+if [ -n "$LAN_CIDR" ]; then
+    LAN_CIDR="$(python3 -I -c 'import ipaddress, sys; print(ipaddress.ip_network(sys.argv[1], strict=False))' \
+                "$LAN_CIDR" 2>/dev/null)" || die "--lan must be a subnet, like 192.168.1.0/24"
+fi
 if [ -n "$PW_ENV" ] && [ -z "${!PW_ENV+x}" ]; then
     die "\$$PW_ENV is not set inside sudo; use: sudo --preserve-env=$PW_ENV $0 ..."
 fi
@@ -350,27 +354,47 @@ install -m 0644 "$HERE/agent/99-sparkesp32.rules" "$RULES"
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=tty || true
 
+# Who may talk to the agent: this host's own subnet (its default route's interface), where the
+# displays on Wi-Fi are, and where the agent reaches a Sparkline that runs here. --lan names
+# another subnet for the displays. The unit limits the agent to them whether or not a firewall
+# does; the ufw rule lets the displays' subnet in.
+own_subnet() {
+    local dev addr
+    dev="$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')" || dev=""
+    [ -n "$dev" ] || return 0
+    addr="$(ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk '{print $4; exit}')" || addr=""
+    python3 -I -c 'import ipaddress, sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$addr" 2>/dev/null || true
+}
+OWN_CIDR="$(own_subnet)"
+ALLOW="$OWN_CIDR"
+[ -z "$LAN_CIDR" ] || [ "$LAN_CIDR" = "$OWN_CIDR" ] || ALLOW="${ALLOW:+$ALLOW }$LAN_CIDR"
+[ -n "$LAN_CIDR" ] || LAN_CIDR="$OWN_CIDR"
+
+unit_file() {        # the unit, limited to $ALLOW, or without that limit when no subnet is known
+    if [ -n "$ALLOW" ]; then
+        sed "s|@LAN@|$ALLOW|" "$HERE/agent/sparkesp32.service"
+    else
+        sed '/^IPAddress/d' "$HERE/agent/sparkesp32.service"
+    fi
+}
+
 say "systemd: sparkesp32.service, as an unprivileged user of its own"
-install -m 0644 "$HERE/agent/sparkesp32.service" "$UNIT"
+unit_file > "$UNIT"
+chmod 0644 "$UNIT"
 systemctl daemon-reload
 systemctl enable --quiet sparkesp32.service
 systemctl restart sparkesp32.service
 RESTORE_AGENT=""
+[ -z "$ALLOW" ] || say "systemd: only this host and $ALLOW can reach the agent"
 
-if [ -z "$LAN_CIDR" ]; then
-    dev="$(ip -4 route show default 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')" || dev=""
-    addr=""
-    [ -z "$dev" ] || addr="$(ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk '{print $4; exit}')" || addr=""
-    LAN_CIDR="$(python3 -I -c 'import ipaddress, sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$addr" 2>/dev/null || true)"
-fi
 if ufw_active; then
     ufw_delete_ours
     [ -n "$LAN_CIDR" ] || die "couldn't work out this host's LAN subnet; re-run with --lan CIDR"
     say "ufw: allow $LAN_CIDR -> :$HTTP_PORT/tcp"
     ufw allow from "$LAN_CIDR" to any port "$HTTP_PORT" proto tcp comment sparkesp32 >/dev/null
-else
-    warn "no active ufw firewall: :$HTTP_PORT/stat (read-only vitals) is open to anything that"
-    warn "can reach this host. Fine on a home LAN; firewall it if this Spark is exposed."
+elif [ -z "$ALLOW" ]; then
+    warn "couldn't work out this host's LAN subnet, and no ufw firewall is active: :$HTTP_PORT/stat"
+    warn "(read-only vitals) is open to anything that can reach this host. Re-run with --lan CIDR."
 fi
 
 # ------------------------------------------------------------------ verify

@@ -26,6 +26,11 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
+# Who may talk to the agent, firewall or not: this host, and the subnets install.sh puts
+# here (this host's own, and --lan). It drops both lines when it can't tell the subnet;
+# then only a firewall limits who reaches the agent.
+IPAddressDeny=any
+IPAddressAllow=localhost @LAN@
 
 [Install]
 WantedBy=multi-user.target

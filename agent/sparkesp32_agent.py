@@ -65,6 +65,7 @@ REJECT_S = 300.0                      # a native port that fails the handshake i
 HANDSHAKE_S = 10.0                    # keep asking a just-plugged-in board this long: it's still
                                       # booting, then its console drops input for 0.5 s
 STALE_S = 5.0                        # /stat answers 503 if the sampler is older than this
+MAX_CLIENTS = 16                      # HTTP requests in flight; a display asks once a second
 MAX_CORES = 32                        # what the display shows; also keeps a line < 256 bytes,
                                       # the firmware console's line buffer
 GPU_STALE_S = 5.0                     # nvidia-smi values older than this are reported unknown
@@ -447,6 +448,52 @@ class Sampler:
 
 # ---------------------------------------------------------------- HTTP
 
+def asked_proto(query):
+    """The protocol a /stat request asks for with ?v=N, at most PROTO. 1 with no v, or with
+    one that isn't a plain number: /stat is v1 for anything from before v2."""
+    asked = urllib.parse.parse_qs(query).get("v", ["1"])[-1]
+    if not (asked.isascii() and asked.isdigit()):      # isdigit() alone takes "²", and int() doesn't
+        return 1
+    return PROTO if len(asked) > 4 else min(int(asked), PROTO)     # longer: int() has a digit limit
+
+
+def public_health(body):
+    """/healthz as a client on another machine gets it: the readings and each state, without
+    what only this Spark's admin needs (the serial port, where Sparkline is, error texts)."""
+    out = {k: v for k, v in body.items() if k != "gpu_error"}
+    out["display"] = {"state": body["display"].get("state")}
+    if "sparkline" in body:
+        out["sparkline"] = {"state": body["sparkline"].get("state")}
+    return out
+
+
+class Server(ThreadingHTTPServer):
+    """A thread per request, at most MAX_CLIENTS of them at once: one more is hung up on.
+    Clients that connect and then say nothing, or send a byte now and then, each hold a
+    thread and a socket for as long as they like; without a limit, they add up."""
+    daemon_threads = True
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._free = threading.BoundedSemaphore(MAX_CLIENTS)
+
+    def process_request(self, request, client_address):
+        if not self._free.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:                   # its thread didn't start
+            self._free.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._free.release()
+
+
 def make_handler(sampler):
     class Handler(BaseHTTPRequestHandler):
         timeout = 5                     # idle clients can't pin a thread forever
@@ -466,15 +513,14 @@ def make_handler(sampler):
             age = time.monotonic() - at
             path, _, query = self.path.partition("?")
             if path == "/stat":
-                # /stat is v1 for anything from before v2; a v2 display asks for /stat?v=2
-                asked = urllib.parse.parse_qs(query).get("v", ["1"])[-1]
-                proto = min(int(asked), PROTO) if asked.isdigit() else 1
                 if line is None or age > STALE_S:
                     self._send(503, "stale\n")
                 else:
-                    self._send(200, wire_line(line, proto) + "\n")
+                    self._send(200, wire_line(line, asked_proto(query)) + "\n")
             elif path == "/healthz":
                 body = dict(version=__version__, age_s=round(age, 2), display=sampler.display, **sample)
+                if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                    body = public_health(body)
                 self._send(200, json.dumps(body) + "\n", "application/json")
             else:
                 self._send(404, "try /stat or /healthz\n")
@@ -632,7 +678,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--interval", type=float, default=1.0, help="seconds between samples")
     ap.add_argument("--bind", default="0.0.0.0",
-                    help="HTTP bind address (default all interfaces; ufw limits it to the LAN)")
+                    help="HTTP bind address (default all interfaces; the installed service and ufw "
+                         "limit it to the LAN)")
     ap.add_argument("--http-port", type=int, default=8787)
     ap.add_argument("--port", help="serial device (default: autodetect the display)")
     ap.add_argument("--no-serial", action="store_true", help="HTTP only")
@@ -665,8 +712,7 @@ def main():
         return 0
 
     if not args.no_http:
-        httpd = ThreadingHTTPServer((args.bind, args.http_port), make_handler(sampler))
-        httpd.daemon_threads = True
+        httpd = Server((args.bind, args.http_port), make_handler(sampler))
         threading.Thread(target=httpd.serve_forever, daemon=True, name="http").start()
         log.info("serving /stat on http://%s:%d", args.bind, args.http_port)
     if not args.no_serial:

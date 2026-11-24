@@ -233,5 +233,24 @@ class InstallerBoardDetection(unittest.TestCase):
         self.assertIn("DIE: couldn't identify", self.pick("", chip=""))
 
 
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
+class InstallerUnitFile(unittest.TestCase):
+    """The systemd unit install.sh writes: who may talk to the agent."""
+
+    def unit(self, allow):
+        script = "\n".join([f"HERE='{ROOT}'; ALLOW='{allow}'", installer_functions("unit_file"), "unit_file"])
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=20).stdout
+
+    def test_limited_to_this_host_and_the_subnets(self):
+        unit = self.unit("192.168.1.0/24 10.9.0.0/24")
+        self.assertIn("\nIPAddressDeny=any\nIPAddressAllow=localhost 192.168.1.0/24 10.9.0.0/24\n", unit)
+        self.assertNotIn("@", unit)
+
+    def test_no_known_subnet_means_no_limit_rather_than_no_access(self):
+        unit = self.unit("")
+        self.assertIn("\nExecStart=", unit)
+        self.assertNotRegex(unit, r"(?m)^IPAddress|@")     # a Deny without its Allow would shut everyone out
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

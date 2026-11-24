@@ -8,6 +8,7 @@ import base64
 import json
 import os
 import re
+import socket
 import sys
 import tempfile
 import threading
@@ -240,11 +241,10 @@ class GpuReaderLifecycleTest(unittest.TestCase):
 
 class HttpTest(unittest.TestCase):
     def setUp(self):
-        from http.server import ThreadingHTTPServer
         self.sampler = agent.Sampler.__new__(agent.Sampler)
         self.sampler.snap = ("stat 1 2 3 4 5 6 7 h 2405 0", time.monotonic(), {"cpu": 1})
         self.sampler.display = "not connected"
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), agent.make_handler(self.sampler))
+        self.httpd = agent.Server(("127.0.0.1", 0), agent.make_handler(self.sampler))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
 
@@ -271,6 +271,8 @@ class HttpTest(unittest.TestCase):
                             ("?x=1&v=2", "stat 1 2 3 4 5 6 7 h 2405 0\n"),
                             ("?v=1", "stat 1 2 3 4 5 6 7 h\n"),
                             ("?v=two", "stat 1 2 3 4 5 6 7 h\n"),
+                            ("?v=%C2%B2", "stat 1 2 3 4 5 6 7 h\n"),    # a digit to isdigit(), not to int()
+                            ("?v=" + "9" * 5000, "stat 1 2 3 4 5 6 7 h 2405 0\n"),   # past int()'s limit
                             ("?", "stat 1 2 3 4 5 6 7 h\n")]:
             with self.subTest(query=query):
                 self.assertEqual(self.get("/stat" + query)[:2], (200, want))
@@ -285,6 +287,45 @@ class HttpTest(unittest.TestCase):
         h = json.loads(body)
         self.assertEqual((code, h["version"], h["display"], h["cpu"]),
                          (200, agent.__version__, "not connected", 1))
+
+    def test_healthz_keeps_the_details_from_other_machines(self):
+        line, at, _ = self.sampler.snap
+        self.sampler.display = {"state": "streaming", "port": "/dev/ttyACM0", "proto": 2}
+        self.sampler.snap = (line, at, {"cpu": 1, "gpu_error": "exit 9: driver gone", "sparkline": {
+            "url": "http://auto:9750", "state": "error", "error": "HTTP 401"}})
+        here = json.loads(self.get("/healthz")[1])                   # on the Spark itself: everything
+        self.assertEqual((here["display"]["port"], here["sparkline"]["url"], here["gpu_error"]),
+                         ("/dev/ttyACM0", "http://auto:9750", "exit 9: driver gone"))
+
+        class FromTheLan(self.httpd.RequestHandlerClass):
+            def setup(self):
+                super().setup()
+                self.client_address = ("192.168.1.77", 50000)
+        self.httpd.RequestHandlerClass = FromTheLan
+        code, body, _ = self.get("/healthz")
+        there = json.loads(body)
+        self.assertEqual((code, there["cpu"], there["display"], there["sparkline"]),
+                         (200, 1, {"state": "streaming"}, {"state": "error"}))
+        for detail in ("ttyACM0", "9750", "401", "driver gone"):
+            self.assertNotIn(detail, body)
+
+    def test_idle_clients_dont_pile_up(self):
+        addr = self.httpd.server_address
+        idle = [socket.create_connection(addr) for _ in range(agent.MAX_CLIENTS)]   # connect, say nothing
+        with self.assertRaises(OSError):            # one more than the limit is hung up on
+            self.get("/stat")
+        for s in idle:
+            s.close()
+        deadline = time.monotonic() + 5
+        while True:                                 # and the places come back as they leave
+            try:
+                code = self.get("/stat")[0]
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.05)
+        self.assertEqual(code, 200)
 
     def test_unknown_path_404(self):
         self.assertEqual(self.get("/nope")[0], 404)
