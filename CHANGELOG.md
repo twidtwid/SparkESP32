@@ -29,6 +29,17 @@ All notable changes to this project are documented here.
 - Releases: every GitHub action is pinned to a commit, the firmware is built by a job that
   can't write to the repository, and the bundles carry a signed build provenance
   (`gh attestation verify <file> --repo twidtwid/SparkESP32`).
+- The installer no longer flashes a device that doesn't run SparkESP32 without being told
+  to. Updating with `sudo ./install.sh --yes` while some other ESP32 board was the only one
+  plugged in replaced that board's program.
+- The installer's Python packages are installed by hash: `agent/requirements.txt` names
+  every package esptool pulls in, not just pyserial and esptool.
+- The tools print what a device sends with every control character but tab and newline
+  removed. Only ANSI colour codes were dropped before, so a device could send other
+  escape sequences to root's terminal.
+- The service's sandbox is tighter: no capabilities, no home directories, an ordinary
+  service's system calls, only IP, Unix and netlink sockets
+  (`systemd-analyze security sparkesp32`: 7.8 to 2.1).
 
 ### Changed
 
@@ -48,6 +59,11 @@ All notable changes to this project are documented here.
   `sudo systemctl restart sparkesp32`.
 - `devctl.py` and `provision.py` refuse a port the agent has, instead of garbling its
   console: stop the agent first, as before.
+- At a terminal, the installer asks before it flashes a board that isn't running
+  SparkESP32 (Enter goes ahead for a new display). `--port` or `--board` answers the
+  question in advance; `--yes` flashes unless another device is this Spark's display.
+- `agent/requirements.txt` is generated from `agent/requirements.in` (`uv pip compile`,
+  the command is at the top of both).
 
 ## 1.4.1 — 2026-11-22
 

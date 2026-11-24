@@ -91,7 +91,8 @@ agent/
                            /stat,/healthz (stdlib + pyserial)
   sparkesp32.service       systemd unit template (@LAN@: the subnets that may reach the agent)
   99-sparkesp32.rules      udev: ModemManager ignores the display's USB IDs (native + bridges)
-  requirements.txt         pinned pyserial + esptool for /opt/sparkesp32/venv
+  requirements.in          pyserial + esptool, the two packages /opt/sparkesp32/venv is for
+  requirements.txt         those and everything they pull in, pinned with hashes (generated)
 tools/
   sparklink.py             serial plumbing: find by USB ID, handshake, run-until-terminator
   provision.py             set name/host/Wi-Fi/rotation over USB (never prints the password)
@@ -143,6 +144,9 @@ docs/                      protocol.md, troubleshooting.md, adding-a-device.md
   `tools/sparklink.py` depends on that.
 - Bump `VERSION` and `__version__` in the agent together (`make check` enforces it), and
   add a `CHANGELOG.md` entry.
+- A new or bumped Python package goes in `agent/requirements.in`; then regenerate
+  `agent/requirements.txt` with the `uv pip compile` command at the top of both files.
+  The installer installs with `--require-hashes`, so a hand-edited version won't install.
 
 ## Adding a new device
 

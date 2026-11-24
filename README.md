@@ -94,7 +94,8 @@ sudo ./install.sh
 
 Plug the display into one of the Spark's USB-C ports first. The installer:
 
-1. flashes the firmware (only if the board isn't already on this version),
+1. flashes the firmware (only if the board isn't already on this version; a board that
+   isn't running SparkESP32 yet, it asks about first, since flashing replaces what's on it),
 2. points the display at this Spark's agent. The display's title is the Spark's hostname,
    sent live by the agent, unless you pick a name,
 3. offers to set up Wi-Fi. It lists the 2.4 GHz networks the board can see, and you type

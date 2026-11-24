@@ -236,6 +236,10 @@ The Elecrow e-papers (5.79" and 4.2") behave differently from the lit screens, b
   CH340/CP210x device is plugged in but isn't running SparkESP32. If it's a new display
   (an Elecrow e-paper), name it so the installer flashes it:
   `sudo ./install.sh --board elecrow-esp32s3-epaper-5.79` (or `elecrow-esp32s3-epaper-4.2`).
+- `... doesn't run SparkESP32, and nothing says it's the display: leaving it alone`: the
+  installer won't flash a board it can't vouch for when it has nobody to ask (`--yes`, or no
+  terminal) and another device is saved as this Spark's display. If this is a display, name
+  it: `sudo ./install.sh --port /dev/ttyACMn`.
 - `couldn't identify the board` or `pick its board with --board`: the board isn't running
   SparkESP32 yet and its chip matches more than one supported board, or none. Name it:
   `sudo ./install.sh --board <id>` (`./install.sh --help` lists the ids).

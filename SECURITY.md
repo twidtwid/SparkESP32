@@ -37,7 +37,14 @@ Things this project deliberately does, so you can judge reports against them:
   can read it. It is never printed to the console, logged, or kept in the
   console's command history, and the Wi-Fi driver's own persistent copy is disabled.
 - The agent runs as an unprivileged user of its own (systemd's `DynamicUser`, nobody's
-  login account) under a hardened systemd unit.
+  login account) under a hardened systemd unit: no capabilities, no home directories, a
+  read-only filesystem, an ordinary service's system calls
+  (`systemd-analyze security sparkesp32`).
+- The installer flashes a device that doesn't run SparkESP32 only when you name it
+  (`--port`, `--board`) or say yes at its prompt; with `--yes` and nobody to ask, not
+  when another device is saved as this Spark's display. Its Python packages are installed
+  by hash (`agent/requirements.txt`), and what a device sends is printed with every
+  control character but tab and newline removed.
 - Only asking tells a display from another Espressif board or serial adapter, so a host
   opens a candidate's port and sends it `status`. The installer does that to the device you
   plugged in and saves which one answered; from then on the agent opens that device only.
