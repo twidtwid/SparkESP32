@@ -234,6 +234,45 @@ class InstallerBoardDetection(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("bash"), "needs bash")
+class InstallerFlashConsent(unittest.TestCase):
+    """may_flash: whether install.sh flashes a device that doesn't run SparkESP32."""
+    THIS, ANOTHER = "303a:1001:F4:12:FA:00:00:01", "303a:1001:F4:12:FA:00:00:02"
+
+    def ask(self, saved="", tty=False, answer="", port_given="", board=""):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.path.join(tmp, "display.env")
+            if saved:
+                pathlib.Path(env).write_text(f"SPARKESP32_DISPLAY={saved}\n")
+            script = "\n".join([
+                "set -u",
+                installer_functions("saved_display", "may_flash"),
+                f"interactive() {{ [ {int(tty)} = 1 ]; }}",
+                f"usb_id() {{ echo '{self.THIS}'; }}",              # the device on $PORT
+                f"DISPLAY_ENV='{env}'; PORT=/dev/ttyACM0; PORT_GIVEN='{port_given}'; BOARD='{board}'",
+                "if may_flash; then echo flash; else echo leave; fi",
+            ])
+            r = subprocess.run(["bash", "-c", script], input=answer, capture_output=True, text=True,
+                               timeout=20)
+            return r.stdout.strip()
+
+    def test_a_named_device_is_flashed(self):
+        self.assertEqual(self.ask(saved=self.ANOTHER, port_given="/dev/ttyACM0"), "flash")
+        self.assertEqual(self.ask(saved=self.ANOTHER, board=C6), "flash")
+
+    def test_with_nobody_to_ask_only_another_display_stops_it(self):
+        self.assertEqual(self.ask(), "flash")                        # --yes on a first install
+        self.assertEqual(self.ask(saved=self.THIS), "flash")         # the display itself, wiped since
+        self.assertEqual(self.ask(saved=self.ANOTHER), "leave")      # an update, another board attached
+
+    def test_at_a_terminal_it_asks(self):
+        self.assertEqual(self.ask(tty=True, answer="\n"), "flash")   # a new display: Enter goes ahead
+        self.assertEqual(self.ask(tty=True, answer="n\n"), "leave")
+        # not the display set up here before: Enter doesn't flash it
+        self.assertEqual(self.ask(tty=True, saved=self.ANOTHER, answer="\n"), "leave")
+        self.assertEqual(self.ask(tty=True, saved=self.ANOTHER, answer="yes\n"), "flash")
+
+
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
 class InstallerUnitFile(unittest.TestCase):
     """The systemd unit install.sh writes: who may talk to the agent."""
 

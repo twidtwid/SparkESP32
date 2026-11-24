@@ -235,6 +235,33 @@ if [ -n "$PORT" ] && unclaimed_bridge; then
     PORT="" DEV_STATUS=""
 fi
 
+# A device that doesn't answer as a SparkESP32 is a new display, or it's somebody's other
+# ESP32 project, which flashing would replace. Flash it when --port or --board names it, when
+# you say so at the prompt, or, with nobody to ask, unless another device is this Spark's display.
+usb_id() { sparklink 'print(sparklink.port_id(sys.argv[2]) or "")' "$PORT" 2>/dev/null || true; }
+saved_display() { sed -n 's/^SPARKESP32_DISPLAY=//p' "$DISPLAY_ENV" 2>/dev/null || true; }
+may_flash() {
+    [ -z "$BOARD" ] && [ -z "$PORT_GIVEN" ] || return 0
+    local saved other="" answer=""
+    saved="$(saved_display)"
+    [ -z "$saved" ] || [ "$saved" = "$(usb_id)" ] || other=1
+    if ! interactive; then
+        [ -z "$other" ]
+    elif [ -n "$other" ]; then
+        read -r -p "$PORT doesn't run SparkESP32, and it isn't the display set up here before. Flash it anyway? That replaces the program on it. [y/N] " answer || true
+        [[ "$answer" == [yY]* ]]
+    else
+        read -r -p "$PORT doesn't run SparkESP32 yet. Flash it? That replaces the program on it. [Y/n] " answer || true
+        [[ "$answer" != [nN]* ]]
+    fi
+}
+
+if [ -n "$PORT" ] && [ -z "$NO_FLASH" ] && [ -z "$(board_version)" ] && ! may_flash; then
+    warn "$PORT doesn't run SparkESP32, and nothing says it's the display: leaving it alone."
+    warn "To flash it, name it: --port $PORT (or --board <id>)"
+    PORT="" DEV_STATUS=""
+fi
+
 if [ -z "$PORT" ]; then
     warn "no display on USB: skipping flash + setup. Plug it into this Spark and re-run,"
     warn "or set it up from another computer (README: 'Setting up from a Mac or PC')."
@@ -361,21 +388,16 @@ fi
 # keep doing it to whatever else gets plugged into this Spark. So save what identifies this
 # device (its USB serial number, or for a bridge without one its USB socket), and the agent
 # opens that device only. No display this time: what was saved stays.
-display_id() {       # the id to save for the display on $PORT, or nothing
-    [ -n "$PORT" ] && [ -n "$DEV_STATUS" ] || return 0
-    sparklink 'print(sparklink.port_id(sys.argv[2]) or "")' "$PORT" 2>/dev/null || true
-}
-
 if [ -n "$ANY_DISPLAY" ]; then
     rm -f "$DISPLAY_ENV"
     say "the agent will ask every Espressif or USB-UART device once when it's plugged in"
-else
-    DISPLAY_ID="$(display_id)"
+elif [ -n "$PORT" ] && [ -n "$DEV_STATUS" ]; then
+    DISPLAY_ID="$(usb_id)"
     if [ -n "$DISPLAY_ID" ]; then
         install -d -m 0755 "$(dirname "$DISPLAY_ENV")"
         printf 'SPARKESP32_DISPLAY=%s\n' "$DISPLAY_ID" > "$DISPLAY_ENV"
         say "the agent will open this display only (for another one: plug it in and re-run this)"
-    elif [ -n "$PORT" ] && [ -n "$DEV_STATUS" ]; then
+    else
         rm -f "$DISPLAY_ENV"      # a display we can't tell apart: don't hold the agent to an older one
         warn "this display has no USB serial number or location to know it by: the agent will ask"
         warn "every Espressif or USB-UART device once when it's plugged in"
