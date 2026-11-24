@@ -6,9 +6,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# @RUN_USER@ is filled in by install.sh (the user who ran sudo)
-User=@RUN_USER@
-# serial access to the display without adding the user to dialout
+# Its own unprivileged user, which systemd makes for as long as the service runs. Nobody's
+# login account: nothing else on the Spark runs as it, so nothing else can read what the
+# agent holds (a Sparkline token, below).
+DynamicUser=yes
+# serial access to the display
 SupplementaryGroups=dialout
 # written by install.sh only when a Sparkline agent runs here: its URL and token
 EnvironmentFile=-/etc/sparkesp32/sparkline.env

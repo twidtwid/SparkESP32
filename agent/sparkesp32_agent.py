@@ -23,6 +23,8 @@ answers the `status` handshake with `fw=sparkesp32`, so other serial gadgets on
 the host are never written to. Installed by install.sh as a systemd service.
 """
 import argparse
+import http.client
+import ipaddress
 import json
 import logging
 import math
@@ -35,9 +37,7 @@ import sys
 import threading
 import time
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -293,6 +293,22 @@ def snapshot_fields(s):
                 cores=[pct(c) for c in cpu["per_core"]][:MAX_CORES])
 
 
+def default_route_ip():
+    """This host's IPv4 address on its default route: where a Sparkline whose `bind` is
+    "auto" listens. Raises OSError when there's no such route. Nothing is sent: connecting
+    a UDP socket only asks the kernel which address it would send from."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("1.1.1.1", 9))
+        return s.getsockname()[0]
+
+
+def is_this_host(sock):
+    """True if `sock` is connected to this machine itself: the kernel reaches one of the
+    host's own addresses from that same address, and loopback from loopback."""
+    here, peer = sock.getsockname()[0], sock.getpeername()[0]
+    return here == peer or ipaddress.ip_address(peer).is_loopback
+
+
 class SparklineSource:
     """Readings from a Sparkline agent (github.com/sfxnz/sparkline) on this Spark.
 
@@ -300,33 +316,55 @@ class SparklineSource:
     failure (refused, timeout, 401, a stale or unrecognized sample) makes read() return
     None, so the sampler uses its own readings, and Sparkline is asked again after
     SPARKLINE_RETRY_S. Published in /healthz as "sparkline": {url, state, error}.
-    The token is only ever sent to that URL: never logged, never in /healthz.
+
+    The host in <url> may be "auto", Sparkline's own default for `bind`: this host's
+    address on its default route, looked up for every request, so a new DHCP lease is
+    followed. The token opens all of Sparkline's API (updates and benchmarks too), so it
+    is sent only once the connection is seen to end on this host: an address this Spark
+    no longer has is some other machine's. It is never logged and never in /healthz.
     """
 
     def __init__(self, url, token):
         self.url = url.rstrip("/")
-        self._req = urllib.request.Request(self.url + "/api/v1/snapshot",
-                                           headers={"Authorization": f"Bearer {token}"})
+        u = urllib.parse.urlsplit(self.url)
+        if u.scheme != "http" or not u.hostname:
+            raise ValueError(f"Sparkline's URL must be http://host[:port], not {url!r}")
+        self._host, self._port, self._path = u.hostname, u.port or 80, u.path + "/api/v1/snapshot"
+        self._auth = {"Authorization": f"Bearer {token}"}
         self.state, self.error, self._retry_at = "starting", None, 0.0
+
+    def _fetch(self):
+        """Sparkline's snapshot, parsed. Raises OSError, ValueError or http.client.HTTPException."""
+        host = default_route_ip() if self._host == "auto" else self._host
+        conn = http.client.HTTPConnection(host, self._port, timeout=SPARKLINE_TIMEOUT_S)
+        try:
+            conn.connect()
+            if not is_this_host(conn.sock):         # before anything is sent
+                raise ValueError(f"{host} isn't this host, so it doesn't get Sparkline's token: "
+                                 "re-run install.sh")
+            conn.request("GET", self._path, headers=self._auth)
+            r = conn.getresponse()
+            if r.status != 200:                     # a redirect too: the token doesn't follow one
+                raise ValueError(f"HTTP {r.status}" + (" (token rejected: re-run install.sh)"
+                                                       if r.status in (401, 403) else ""))
+            return json.load(r)
+        finally:
+            conn.close()
 
     def read(self):
         """Our sample fields, or None (self.error says why) to sample ourselves this tick."""
         if time.monotonic() < self._retry_at:
             return None
         try:
-            with urllib.request.urlopen(self._req, timeout=SPARKLINE_TIMEOUT_S) as r:
-                s = json.load(r)
+            s = self._fetch()
             age = time.time() - s["ts"]
             if age > STALE_S:
                 raise ValueError(f"its latest sample is {age:.0f}s old")
             fields = snapshot_fields(s)
-        except urllib.error.HTTPError as e:
-            e.close()
-            why = f"HTTP {e.code}" + (" (token rejected: re-run install.sh)" if e.code in (401, 403) else "")
         except (KeyError, TypeError, IndexError, AttributeError) as e:
             why = f"unrecognized snapshot ({type(e).__name__}: {e})"
-        except (OSError, ValueError) as e:      # refused, timeout, bad JSON, stale
-            why = str(e) or type(e).__name__
+        except (OSError, ValueError, http.client.HTTPException) as e:   # refused, timeout, not this
+            why = str(e) or type(e).__name__                            # host, an HTTP error, bad JSON, stale
         else:
             if self.state != "ok":
                 log.info("reading from Sparkline at %s", self.url)
@@ -601,8 +639,9 @@ def main():
     ap.add_argument("--no-http", action="store_true", help="USB only")
     ap.add_argument("--once", action="store_true", help="print one stat line and exit")
     ap.add_argument("--sparkline-url", default=os.environ.get("SPARKLINE_URL"),
-                    help="read from the Sparkline agent at this URL (token in $SPARKLINE_TOKEN); "
-                         "install.sh sets both when it finds one")
+                    help="read from the Sparkline agent at this URL, on this host (http://auto:PORT "
+                         "for its default-route address; token in $SPARKLINE_TOKEN); install.sh "
+                         "sets both when it finds one")
     ap.add_argument("--version", action="version", version=__version__)
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -611,7 +650,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
 
-    token = os.environ.get("SPARKLINE_TOKEN", "")
+    token = os.environ.pop("SPARKLINE_TOKEN", "")     # popped: nvidia-smi doesn't inherit it
     sparkline = SparklineSource(args.sparkline_url, token) if args.sparkline_url and token else None
     gpu = GpuReader(stop)
     sampler = Sampler(gpu, sparkline)

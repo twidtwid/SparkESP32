@@ -121,10 +121,6 @@ fi
 
 # ------------------------------------------------------------------ preflight
 
-RUN_USER="${RUN_USER:-${SUDO_USER:-}}"
-[ -n "$RUN_USER" ] && [ "$RUN_USER" != root ] ||
-    die "run this with sudo from your normal account (or set RUN_USER=<user>); the agent doesn't run as root"
-id "$RUN_USER" >/dev/null 2>&1 || die "no such user: $RUN_USER"
 command -v python3 >/dev/null || die "python3 is required"
 # Every python here runs isolated (-I). Without it, -c, -m and a script on stdin put the
 # current directory first on the module path, and this runs as root from wherever it's called.
@@ -144,7 +140,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-say "SparkESP32 $VERSION for $(hostname -s), agent runs as $RUN_USER"
+say "SparkESP32 $VERSION for $(hostname -s)"
 if systemctl is-active --quiet sparkesp32.service; then
     RESTORE_AGENT=1
     systemctl stop sparkesp32.service       # frees the serial port + :$HTTP_PORT
@@ -319,17 +315,17 @@ fi
 # A Sparkline agent (github.com/sfxnz/sparkline) already samples this Spark once a second. When
 # one runs here, our agent reads its /api/v1/snapshot instead of running nvidia-smi a second
 # time, so the display and the Sparkline dashboard show the same numbers. Its token goes in a
-# root-only file that systemd hands to our service; it never goes to the display.
+# root-only file that systemd hands to our service, which runs as a user of its own; it never
+# goes to the display.
 sparkline_config() {     # prints "URL TOKEN" for a Sparkline agent running here, or nothing
     systemctl is-active --quiet sparkline-agent.service 2>/dev/null || return 0
     [ -r /etc/sparkline/agent.toml ] || return 0
     "$PY" -I - <<'EOF' 2>/dev/null || true
-import subprocess, tomllib
+import tomllib
 c = tomllib.load(open("/etc/sparkline/agent.toml", "rb"))
+# bind "auto" (Sparkline's default: this host's default-route address) stays "auto". Our agent
+# looks the address up for each request, so the token never follows an address this host had.
 token, bind, port = c.get("token", ""), c.get("bind", "auto"), c.get("port", 9750)
-if bind == "auto":       # Sparkline's rule: the IPv4 address of the default-route interface
-    out = subprocess.run(["ip", "-4", "route", "get", "1.1.1.1"], capture_output=True, text=True).stdout.split()
-    bind = out[out.index("src") + 1] if "src" in out else ""
 if ":" in bind:
     bind = f"[{bind}]"
 if token and bind:
@@ -354,8 +350,8 @@ install -m 0644 "$HERE/agent/99-sparkesp32.rules" "$RULES"
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=tty || true
 
-say "systemd: sparkesp32.service as $RUN_USER"
-sed "s/@RUN_USER@/$RUN_USER/" "$HERE/agent/sparkesp32.service" > "$UNIT"
+say "systemd: sparkesp32.service, as an unprivileged user of its own"
+install -m 0644 "$HERE/agent/sparkesp32.service" "$UNIT"
 systemctl daemon-reload
 systemctl enable --quiet sparkesp32.service
 systemctl restart sparkesp32.service

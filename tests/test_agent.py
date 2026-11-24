@@ -850,7 +850,7 @@ class SparklineSourceTest(unittest.TestCase):
 
     TOKEN = "t" * 43
 
-    def serve(self, status=200, body=None):
+    def serve(self, status=200, body=None, location=None):
         test, seen = self, []
 
         class Handler(agent.BaseHTTPRequestHandler):
@@ -858,6 +858,8 @@ class SparklineSourceTest(unittest.TestCase):
                 seen.append((self.path, self.headers.get("Authorization")))
                 data = (json.dumps(snapshot()) if body is None else body).encode()
                 self.send_response(status)
+                if location:
+                    self.send_header("Location", location)
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -869,6 +871,10 @@ class SparklineSourceTest(unittest.TestCase):
         test.addCleanup(httpd.server_close)
         test.addCleanup(httpd.shutdown)
         return f"http://127.0.0.1:{httpd.server_port}", seen
+
+    def swap(self, name, value):
+        self.addCleanup(setattr, agent, name, getattr(agent, name))
+        setattr(agent, name, value)
 
     def test_reads_with_the_bearer_token(self):
         url, seen = self.serve()
@@ -904,6 +910,46 @@ class SparklineSourceTest(unittest.TestCase):
         src._retry_at = time.monotonic() + 60       # as if it had just failed
         self.assertIsNone(src.read())
         self.assertEqual(seen, [])                  # it didn't ask during the backoff
+
+    def test_the_token_only_goes_to_this_host(self):
+        url, seen = self.serve()
+        self.swap("is_this_host", lambda sock: False)     # as if the address were another machine's now
+        src = agent.SparklineSource(url, self.TOKEN)
+        self.assertIsNone(src.read())
+        self.assertEqual(seen, [])                  # connected, saw where to, and sent nothing
+        self.assertIn("isn't this host", src.error)
+        self.assertNotIn(self.TOKEN, json.dumps(src.health()))
+
+    def test_this_host_is_its_own_address_or_loopback(self):
+        def sock(here, peer):
+            return types.SimpleNamespace(getsockname=lambda: (here, 50000), getpeername=lambda: (peer, 9750))
+        self.assertTrue(agent.is_this_host(sock("192.168.1.50", "192.168.1.50")))
+        self.assertTrue(agent.is_this_host(sock("127.0.0.1", "127.0.0.2")))
+        self.assertTrue(agent.is_this_host(sock("::1", "::1")))
+        self.assertFalse(agent.is_this_host(sock("192.168.1.50", "192.168.1.77")))   # another machine
+
+    def test_the_token_doesnt_follow_a_redirect(self):
+        elsewhere, seen_elsewhere = self.serve()
+        url, seen = self.serve(status=302, body="", location=elsewhere + "/api/v1/snapshot")
+        src = agent.SparklineSource(url, self.TOKEN)
+        self.assertIsNone(src.read())
+        self.assertEqual((len(seen), seen_elsewhere, src.error), (1, [], "HTTP 302"))
+
+    def test_auto_is_this_hosts_default_route_address(self):
+        url, seen = self.serve()
+        port = url.rsplit(":", 1)[1]
+        self.swap("default_route_ip", lambda: "127.0.0.1")
+        src = agent.SparklineSource(f"http://auto:{port}", self.TOKEN)
+        self.assertEqual(src.read()["mem_total_mb"], 130661)
+        self.assertEqual(src.health()["url"], f"http://auto:{port}")     # the setting, not today's address
+
+        def no_route():
+            raise OSError(101, "Network is unreachable")
+        self.swap("default_route_ip", no_route)
+        src = agent.SparklineSource(f"http://auto:{port}", self.TOKEN)
+        self.assertIsNone(src.read())               # no route, no Sparkline: we sample ourselves
+        self.assertIn("unreachable", src.error)
+        self.assertEqual(len(seen), 1)
 
 
 if __name__ == "__main__":
