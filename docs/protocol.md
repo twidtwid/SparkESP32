@@ -102,11 +102,27 @@ CDC ignores it. On a bridge that doesn't answer at 115200 they ask again at 9216
 rate 1.3.0 used, so an older board is still found and can be upgraded.
 
 Hosts look at native ports first: the tools and the installer consider bridges only when
-no native port is attached, and the agent tries native ports before bridges. The agent
-opens a port exclusively, so it never writes into one another program holds. A bridge
-that doesn't answer the handshake below, or that another program holds, is left alone
-until it's replugged (a new device node, even at the same path), since it may be some
-other gadget.
+no native port is attached, and the agent tries native ports before bridges.
+
+Nothing in a device's USB descriptors tells a display from another Espressif board or
+another serial adapter: a host has to open the port and ask (the handshake below). So that
+the agent doesn't do that to whatever is plugged into the Spark, the installer saves what
+identifies the display it has seen answer, in `/etc/sparkesp32/display.env`: its USB IDs
+and serial number (`303a:1001:<the chip's MAC>`), or for a bridge without a serial number
+(the CH340) the USB socket it's in (`1a86:7523@1-2.3:1.0`). With a display saved, the agent
+opens that device and no other; `/healthz` lists the ones it leaves alone under
+`"ignoring"`. A display moved to the Spark from elsewhere, a replacement, or a CH340 board
+moved to another socket needs `sudo ./install.sh` once. `--any-display` forgets the saved
+one.
+
+With no display saved, the agent asks each Espressif or bridge device once when it's
+plugged in (and when the agent starts). One that doesn't answer is left alone until it's
+replugged (a new device node, even at the same path), since it may be some other gadget.
+The saved display, or the one `--port` names, is asked again every 5 minutes.
+
+Hosts open a port with an advisory lock (`flock`). That keeps them out of a port another
+program has locked the same way, and out of each other's way; it doesn't show that a
+program has the port open without locking it.
 
 The agent writes one `stat` line per second, terminated by `\n`. The board replies
 `OK stat` or `ERR stat <field>`. The console echoes input, and the agent discards

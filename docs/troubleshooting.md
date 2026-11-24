@@ -40,9 +40,13 @@ Nothing has arrived over USB yet.
     port failed. Make sure no other program has the port open (`screen`, `minicom`,
     `devctl.py`, an IDE monitor) with `sudo fuser -v /dev/ttyACM*`. Then re-run
     `sudo ./install.sh`, which also reflashes if the board isn't running SparkESP32.
+    With `"ignoring"`: those devices are plugged in, but none is the display the installer
+    saw, and the agent opens only that one. It's another board, a replacement, or a CH340
+    board in another USB socket than before: `sudo ./install.sh` with it plugged in.
   - `handshaking`: it's asking the board who it is (up to 10 s after it's plugged in).
-  - `rejected`: the board on `"port"` didn't answer as SparkESP32 within 10 s, so the
-    agent skips it for `"retry_in_s"` more seconds. Unplug it and plug it back in (a
+  - `rejected`: the board on `"port"` didn't answer as SparkESP32 within 10 s. The display
+    the installer saw is asked again in `"retry_in_s"` seconds; any other device
+    (`"retry_in_s": null`) not until it's replugged. Unplug it and plug it back in (a
     replugged board is retried at once). If it's rejected again, it's running different
     firmware: re-run `sudo ./install.sh` to flash it.
   - `streaming`: all good; `"answered_in_s"` is how long the board took to answer.
@@ -216,10 +220,10 @@ The Elecrow e-papers (5.79" and 4.2") behave differently from the lit screens, b
   green sticker on the back, an SSD1683 controller), which this firmware doesn't drive.
   Restore its factory flash (`esptool write_flash 0x0 <backup>`).
 - `/healthz` → `"display"` → `"state": "rejected"` with `"retry_in_s": null`: the agent
-  asked a USB-UART bridge whether it's a SparkESP32 and got no answer (at 115200 or at
-  1.3.0's 921600), or another program has that port open, so it leaves that device alone
-  until it's replugged. Unplug and replug the board, or check it runs
-  SparkESP32 (`devctl.py status`).
+  asked a device the installer hasn't seen whether it's a SparkESP32 and got no answer (a
+  bridge is asked at 115200 and at 1.3.0's 921600), or another program has a bridge's port
+  locked, so it leaves that device alone until it's replugged. Unplug and replug the board,
+  or check it runs SparkESP32 (`devctl.py status`), then `sudo ./install.sh`.
 
 ## Flashing fails
 

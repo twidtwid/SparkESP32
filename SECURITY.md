@@ -37,8 +37,13 @@ Things this project deliberately does, so you can judge reports against them:
   can read it. It is never printed to the console, logged, or kept in the
   console's command history, and the Wi-Fi driver's own persistent copy is disabled.
 - The agent runs as an unprivileged user of its own (systemd's `DynamicUser`, nobody's
-  login account) under a hardened systemd unit and only writes to a USB device that
-  answers the SparkESP32 firmware handshake.
+  login account) under a hardened systemd unit.
+- Only asking tells a display from another Espressif board or serial adapter, so a host
+  opens a candidate's port and sends it `status`. The installer does that to the device you
+  plugged in and saves which one answered; from then on the agent opens that device only.
+  Before a display has been saved (or after `--any-display`), the agent asks each
+  Espressif or USB-UART device once when it's plugged in. `stat` lines only ever go to a
+  device that answered the handshake. The lock on the port is advisory (`flock`).
 - On a Spark that runs Sparkline, the agent holds Sparkline's agent token, which opens
   all of Sparkline's API. It is kept in a root-only file, handed to the service by
   systemd, and sent only over a connection that ends on the Spark itself.

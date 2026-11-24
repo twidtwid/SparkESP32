@@ -100,7 +100,8 @@ Plug the display into one of the Spark's USB-C ports first. The installer:
 3. offers to set up Wi-Fi. It lists the 2.4 GHz networks the board can see, and you type
    the password at a hidden prompt,
 4. installs the agent as the `sparkesp32` systemd service (as an unprivileged user of its own, not root and not you),
-   limited to this Spark and your LAN, plus a
+   limited to this Spark and your LAN, and to this display: it opens no other USB device (a second or
+   replacement display needs `sudo ./install.sh` once). Plus a
    udev rule that keeps ModemManager off the board (and off other CH340/CP210x adapters: it goes by chip), and a ufw rule allowing your LAN to reach port 8787,
 5. checks the whole thing end to end.
 

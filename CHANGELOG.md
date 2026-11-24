@@ -21,6 +21,14 @@ All notable changes to this project are documented here.
   too. `/stat?v=` with a value `int()` can't read no longer leaves a traceback in the
   journal. `/healthz` keeps the serial port's path, Sparkline's URL and error texts for
   requests from the Spark itself.
+- The agent opens only the display the installer has seen. It used to open every Espressif
+  USB device and CH340/CP210x adapter and send it `status`, an ESP32 with native USB again
+  every five minutes, and the "exclusive" open only kept out programs that lock the port
+  the same way. The installer saves which device answered (`/etc/sparkesp32/display.env`),
+  and the host tools lock the port like the agent does.
+- Releases: every GitHub action is pinned to a commit, the firmware is built by a job that
+  can't write to the repository, and the bundles carry a signed build provenance
+  (`gh attestation verify <file> --repo twidtwid/SparkESP32`).
 
 ### Changed
 
@@ -29,6 +37,17 @@ All notable changes to this project are documented here.
   (the Spark's own stays, for Sparkline) and replaces it in the ufw rule, and must be a
   subnet such as `192.168.1.0/24`.
 - `RUN_USER` is gone from the installer: the service no longer runs as a login user.
+- Once the installer has seen a display on this Spark, another one (a second, a
+  replacement, a CH340 board moved to another USB socket) isn't picked up by plugging it
+  in: run `sudo ./install.sh` with it attached. `--any-display` goes back to asking every
+  candidate device, once per plug-in. `/healthz` lists the devices the agent leaves alone
+  under `display.ignoring`.
+- With no display saved, an Espressif device that doesn't answer as a SparkESP32 is left
+  alone until it's replugged, as bridges already were, instead of asked again every five
+  minutes. A board flashed while the agent runs is picked up after a replug or
+  `sudo systemctl restart sparkesp32`.
+- `devctl.py` and `provision.py` refuse a port the agent has, instead of garbling its
+  console: stop the agent first, as before.
 
 ## 1.4.1 — 2026-11-22
 

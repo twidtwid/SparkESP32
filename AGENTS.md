@@ -53,7 +53,9 @@ sudo --preserve-env=WIFI_PSK ./install.sh --yes --ssids "HomeNet" --wifi-passwor
 
 Useful flags: `--host <ip>` when mDNS (`<hostname>.local`) doesn't resolve on their LAN;
 `--port /dev/ttyACMn` (or `/dev/ttyUSBn` behind a USB-UART bridge) if several possible
-displays are attached; `--board <id>` if the
+displays are attached; `--any-display` if the agent should look for a display on any USB
+port again (it otherwise opens only the one the installer last saw answer, so a new or
+replacement display needs the installer run once); `--board <id>` if the
 installer can't tell which supported board it is (it asks the firmware, then the chip);
 `--no-flash` to leave the firmware alone; `--lan <cidr>` when the display's Wi-Fi is on
 another subnet than the Spark (the service and the ufw rule let only the Spark's own subnet
