@@ -51,8 +51,10 @@ SparkESP32 $VERSION installer. Run on the DGX Spark with sudo.
   --no-sparkline           sample this host ourselves even if a Sparkline agent runs here
   --reflash                flash even if the board already runs $VERSION
   --port DEV               the display's serial port (default: autodetect)
-  --any-display            forget which USB device is the display: the agent asks every
-                           Espressif or USB-UART device once when it's plugged in
+  --only-this-display      save which USB device is the display: the agent then opens it
+                           and no other (a replacement display needs this installer again)
+  --any-display            forget the saved display: the agent asks every Espressif or
+                           USB-UART device once when it's plugged in (the default)
   --lan CIDR               subnet whose displays may reach :$HTTP_PORT (default: this host's)
   -y, --yes                no questions (for scripts and agents)
   --uninstall              remove the service, rules and $OPT (display settings stay)
@@ -69,7 +71,7 @@ ARGS=""; [ $# -eq 0 ] || printf -v ARGS ' %q' "$@"    # for the "run with sudo" 
 
 NAME="" NAME_SET="" HOST="" SSIDS="" PW_ENV="" OPEN_WIFI="" CLEAR_WIFI="" NO_WIFI="" ROTATION=""
 FW_DIR="" NO_FLASH="" REFLASH="" PORT="" LAN_CIDR="" YES="" UNINSTALL="" BOARD="" NO_SPARKLINE=""
-ANY_DISPLAY=""
+ANY_DISPLAY="" ONLY_THIS_DISPLAY=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --name) NAME="${2?--name needs a value (\"\" for the hostname)}"; NAME_SET=1; shift ;;
@@ -89,6 +91,7 @@ while [ $# -gt 0 ]; do
         --lan) LAN_CIDR="${2?--lan needs a CIDR}"; shift ;;
         -y|--yes) YES=1 ;;
         --any-display) ANY_DISPLAY=1 ;;
+        --only-this-display) ONLY_THIS_DISPLAY=1 ;;
         --uninstall) UNINSTALL=1 ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; die "unknown option: $1" ;;
@@ -238,7 +241,9 @@ fi
 
 # A device that doesn't answer as a SparkESP32 is a new display, or it's somebody's other
 # ESP32 project, which flashing would replace. Flash it when --port or --board names it, when
-# you say so at the prompt, or, with nobody to ask, unless another device is this Spark's display.
+# you say so at the prompt, or, with nobody to ask (--yes), when it's the saved display or this is
+# the first install. An update with --yes leaves a device it doesn't know alone: the display may
+# be on Wi-Fi, and the device on USB someone's other project.
 usb_id() { sparklink 'print(sparklink.port_id(sys.argv[2]) or "")' "$PORT" 2>/dev/null || true; }
 saved_display() { sed -n 's/^SPARKESP32_DISPLAY=//p' "$DISPLAY_ENV" 2>/dev/null || true; }
 may_flash() {
@@ -247,7 +252,8 @@ may_flash() {
     saved="$(saved_display)"
     [ -z "$saved" ] || [ "$saved" = "$(usb_id)" ] || other=1
     if ! interactive; then
-        [ -z "$other" ]
+        [ -z "$other" ] || return 1
+        [ -n "$saved" ] || [ ! -e "$UNIT" ]      # the saved display, or a first install
     elif [ -n "$other" ]; then
         read -r -p "$PORT doesn't run SparkESP32, and it isn't the display set up here before. Flash it anyway? That replaces the program on it. [y/N] " answer || true
         [[ "$answer" == [yY]* ]]
@@ -385,19 +391,23 @@ fi
 # ------------------------------------------------------------------ which device is the display
 
 # Telling a display from another Espressif board or serial adapter takes opening its port and
-# asking it. We just did that for the display on $PORT, with you there; the agent shouldn't
-# keep doing it to whatever else gets plugged into this Spark. So save what identifies this
-# device (its USB serial number, or for a bridge without one its USB socket), and the agent
-# opens that device only. No display this time: what was saved stays.
+# asking it, which the agent does once per plug-in. With --only-this-display, save what
+# identifies the display on $PORT (its USB serial number, or for a bridge without one its USB
+# socket), and the agent opens that device only. That's opt-in: a Spark whose display gets
+# swapped (a C6 one day, an e-paper the next) would otherwise need this installer for each
+# swap. Without either flag, what was saved before stays.
+[ -z "$ANY_DISPLAY" ] || [ -z "$ONLY_THIS_DISPLAY" ] || die "--any-display and --only-this-display contradict each other"
 if [ -n "$ANY_DISPLAY" ]; then
     rm -f "$DISPLAY_ENV"
     say "the agent will ask every Espressif or USB-UART device once when it's plugged in"
-elif [ -n "$PORT" ] && [ -n "$DEV_STATUS" ]; then
+elif [ -n "$ONLY_THIS_DISPLAY" ] && [ -z "$DEV_STATUS" ]; then
+    die "--only-this-display needs the display plugged in and answering"
+elif [ -n "$ONLY_THIS_DISPLAY" ]; then
     DISPLAY_ID="$(usb_id)"
     if [ -n "$DISPLAY_ID" ]; then
         install -d -m 0755 "$(dirname "$DISPLAY_ENV")"
         printf 'SPARKESP32_DISPLAY=%s\n' "$DISPLAY_ID" > "$DISPLAY_ENV"
-        say "the agent will open this display only (for another one: plug it in and re-run this)"
+        say "the agent will open this display only (for another one: --any-display, or plug it in and re-run with --only-this-display)"
     else
         rm -f "$DISPLAY_ENV"      # a display we can't tell apart: don't hold the agent to an older one
         warn "this display has no USB serial number or location to know it by: the agent will ask"

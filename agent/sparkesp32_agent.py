@@ -19,7 +19,7 @@ publishes the same `stat` line (protocol v2, see docs/protocol.md) two ways:
 A display whose firmware predates protocol v2 gets the v1 line it understands.
 
 The serial side streams only to a device that answers the `status` handshake with
-`fw=sparkesp32`, and once install.sh has seen the display it opens no other device
+`fw=sparkesp32`, and after install.sh --only-this-display it opens no other device
 (see serial_loop). Installed by install.sh as a systemd service.
 """
 import argparse
@@ -622,7 +622,8 @@ def serial_loop(sampler, explicit_port, stop, display=None):
     """
     named = bool(explicit_port or display)      # --port or install.sh says which one is the display
     if display and not explicit_port:
-        log.info("USB: opening only the display install.sh saw (to use another: sudo ./install.sh)")
+        log.info("USB: opening only the display install.sh saw (for another: sudo ./install.sh "
+                 "--any-display)")
     # rejected: port -> (until, the device node it was), so a replug clears it however fast
     ser, last_at, rejected, proto = None, 0.0, {}, 1
     while not stop.is_set():
@@ -643,7 +644,7 @@ def serial_loop(sampler, explicit_port, stop, display=None):
                     elif others:
                         sampler.display = {"state": "searching", "ignoring": others}
                         rl.warn("ignoring", "not opening %s: not the display install.sh saw (to use it as "
-                                "the display, run sudo ./install.sh with it plugged in)", ", ".join(others))
+                                "the display, run sudo ./install.sh --any-display)", ", ".join(others))
                     else:
                         sampler.display = {"state": "searching"}
                     stop.wait(2)

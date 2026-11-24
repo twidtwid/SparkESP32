@@ -41,15 +41,15 @@ Things this project deliberately does, so you can judge reports against them:
   read-only filesystem, an ordinary service's system calls
   (`systemd-analyze security sparkesp32`).
 - The installer flashes a device that doesn't run SparkESP32 only when you name it
-  (`--port`, `--board`) or say yes at its prompt; with `--yes` and nobody to ask, not
-  when another device is saved as this Spark's display. Its Python packages are installed
+  (`--port`, `--board`) or say yes at its prompt; with `--yes` and nobody to ask, only on
+  a first install or when it's the display saved with `--only-this-display`. Its Python packages are installed
   by hash (`agent/requirements.txt`), and what a device sends is printed with every
   control character but tab and newline removed.
 - Only asking tells a display from another Espressif board or serial adapter, so a host
-  opens a candidate's port and sends it `status`. The installer does that to the device you
-  plugged in and saves which one answered; from then on the agent opens that device only.
-  Before a display has been saved (or after `--any-display`), the agent asks each
-  Espressif or USB-UART device once when it's plugged in. `stat` lines only ever go to a
+  opens a candidate's port and sends it `status`. By default the agent asks each Espressif
+  or USB-UART device once when it's plugged in. With `--only-this-display` the installer
+  saves which device answered, and from then on the agent opens that device only
+  (`--any-display` forgets it). `stat` lines only ever go to a
   device that answered the handshake. The lock on the port is advisory (`flock`).
 - On a Spark that runs Sparkline, the agent holds Sparkline's agent token, which opens
   all of Sparkline's API. It is kept in a root-only file, handed to the service by

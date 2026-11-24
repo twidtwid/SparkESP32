@@ -106,13 +106,14 @@ no native port is attached, and the agent tries native ports before bridges.
 
 Nothing in a device's USB descriptors tells a display from another Espressif board or
 another serial adapter: a host has to open the port and ask (the handshake below). So that
-the agent doesn't do that to whatever is plugged into the Spark, the installer saves what
-identifies the display it has seen answer, in `/etc/sparkesp32/display.env`: its USB IDs
+the agent doesn't do that to whatever is plugged into the Spark, `install.sh
+--only-this-display` saves what identifies the display it has seen answer, in
+`/etc/sparkesp32/display.env`: its USB IDs
 and serial number (`303a:1001:<the chip's MAC>`), or for a bridge without a serial number
 (the CH340) the USB socket it's in (`1a86:7523@1-2.3:1.0`). With a display saved, the agent
 opens that device and no other; `/healthz` lists the ones it leaves alone under
 `"ignoring"`. A display moved to the Spark from elsewhere, a replacement, or a CH340 board
-moved to another socket needs `sudo ./install.sh` once. `--any-display` forgets the saved
+moved to another socket needs `sudo ./install.sh --only-this-display` once. `--any-display` forgets the saved
 one.
 
 With no display saved, the agent asks each Espressif or bridge device once when it's

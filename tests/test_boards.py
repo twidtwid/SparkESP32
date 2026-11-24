@@ -238,9 +238,11 @@ class InstallerFlashConsent(unittest.TestCase):
     """may_flash: whether install.sh flashes a device that doesn't run SparkESP32."""
     THIS, ANOTHER = "303a:1001:F4:12:FA:00:00:01", "303a:1001:F4:12:FA:00:00:02"
 
-    def ask(self, saved="", tty=False, answer="", port_given="", board=""):
+    def ask(self, saved="", tty=False, answer="", port_given="", board="", installed=False):
         with tempfile.TemporaryDirectory() as tmp:
-            env = os.path.join(tmp, "display.env")
+            env, unit = os.path.join(tmp, "display.env"), os.path.join(tmp, "sparkesp32.service")
+            if installed:
+                pathlib.Path(unit).write_text("")
             if saved:
                 pathlib.Path(env).write_text(f"SPARKESP32_DISPLAY={saved}\n")
             script = "\n".join([
@@ -248,7 +250,8 @@ class InstallerFlashConsent(unittest.TestCase):
                 installer_functions("saved_display", "may_flash"),
                 f"interactive() {{ [ {int(tty)} = 1 ]; }}",
                 f"usb_id() {{ echo '{self.THIS}'; }}",              # the device on $PORT
-                f"DISPLAY_ENV='{env}'; PORT=/dev/ttyACM0; PORT_GIVEN='{port_given}'; BOARD='{board}'",
+                f"DISPLAY_ENV='{env}'; UNIT='{unit}'; PORT=/dev/ttyACM0; PORT_GIVEN='{port_given}'; "
+                f"BOARD='{board}'",
                 "if may_flash; then echo flash; else echo leave; fi",
             ])
             r = subprocess.run(["bash", "-c", script], input=answer, capture_output=True, text=True,
@@ -263,6 +266,11 @@ class InstallerFlashConsent(unittest.TestCase):
         self.assertEqual(self.ask(), "flash")                        # --yes on a first install
         self.assertEqual(self.ask(saved=self.THIS), "flash")         # the display itself, wiped since
         self.assertEqual(self.ask(saved=self.ANOTHER), "leave")      # an update, another board attached
+
+    def test_an_update_with_nothing_saved_leaves_it_alone(self):
+        self.assertEqual(self.ask(installed=True), "leave")          # display on Wi-Fi, a project on USB
+        self.assertEqual(self.ask(installed=True, saved=self.THIS), "flash")
+        self.assertEqual(self.ask(installed=True, board=C6), "flash")
 
     def test_at_a_terminal_it_asks(self):
         self.assertEqual(self.ask(tty=True, answer="\n"), "flash")   # a new display: Enter goes ahead
