@@ -20,14 +20,34 @@ ExecStart=/opt/sparkesp32/venv/bin/python /opt/sparkesp32/sparkesp32_agent.py
 Restart=always
 RestartSec=3
 
-# the agent only reads /proc, runs nvidia-smi (or asks Sparkline), opens one tty and one socket
+# The agent only reads /proc, runs nvidia-smi (or asks Sparkline), opens one tty and one socket.
+# So: nothing to write to, no home directories, no privileges to gain or to keep, only the
+# system calls an ordinary service makes, and only IP, Unix and netlink sockets (the last two
+# for nvidia-smi and the C library). Check it with `systemd-analyze security sparkesp32`.
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=read-only
+ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
 ProtectControlGroups=yes
+ProtectHostname=yes
 RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077
+# a handful of threads and one nvidia-smi: a bound, in case something runs away
+TasksMax=64
+# Left out on purpose: PrivateDevices=, DeviceAllow= and ProtectClock= (which adds a
+# DeviceAllow= rule). Each hides device nodes the agent needs: the display's tty, /dev/nvidia*.
 # Who may talk to the agent, firewall or not: this host, and the subnets install.sh puts
 # here (this host's own, and --lan). It drops both lines when it can't tell the subnet;
 # then only a firewall limits who reaches the agent.
